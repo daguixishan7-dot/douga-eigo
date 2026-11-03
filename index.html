@@ -102,6 +102,18 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sheet h2 { font-size: 28px; margin: 0; font-weight: 800; }
 .sheet .head { font-size: 15px; color: var(--sub); }
 .sheet ol { margin: 12px 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.sheet .wtitle { display: flex; align-items: center; gap: 8px; }
+.say { width: 44px; height: 44px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--chip); flex: none; }
+.say svg { width: 22px; height: 22px; }
+.say.sm { width: 32px; height: 32px; } .say.sm svg { width: 16px; height: 16px; }
+.sheet h3 { font-size: 13px; color: var(--sub); font-weight: 700; margin: 16px 0 6px; }
+.sheet .phr, .sheet .ex { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sheet .phr li { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; }
+.sheet .phr .pm { grid-column: 2; font-size: 15px; }
+.sheet .phr .in { font-size: 12px; font-weight: 700; color: var(--accent, inherit); margin-left: 6px; }
+.sheet .ex li { font-size: 15px; line-height: 1.5; }
+.sheet .ex .ej { color: var(--sub); font-size: 14px; }
+.sheet .ex .src { font-size: 12px; color: var(--sub); text-decoration: underline; text-underline-offset: 3px; min-height: 32px; }
 .sheet .ctx { font-size: 15px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
 .sheet .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .textbtn { min-height: 48px; padding: 0 8px; font-size: 15px; text-decoration: underline; text-underline-offset: 3px; }
@@ -292,9 +304,62 @@ function lookup(word) {
 }
 function senses(mean) {
   // 「answer」「ampere」のような略語の言いかえ（日本語を含まない意味）は後ろへ回す
-  const all = mean.replace(/『|』/g, "").split(" / ").map(s => s.trim()).filter(Boolean);
+  // 長い見出し（take など）は「・」でも意味を区切っている
+  // （〈魚・獲物〉のように、かっこの中の「・」では区切らない）
+  const parts = []; let cur = "", depth = 0;
+  for (const ch of mean.replace(/『|』/g, "").replace(/ \/ /g, "\u0001")) {
+    if ("〈(（《[".includes(ch)) depth++;
+    if ("〉)）》]".includes(ch)) depth = Math.max(0, depth - 1);
+    if (ch === "\u0001" || (ch === "・" && depth === 0)) { parts.push(cur); cur = ""; } else cur += ch;
+  }
+  const all = [...parts, cur].map(s => s.trim()).filter(Boolean);
   const jp = s => /[぀-ヿ一-鿿]/.test(s);
   return [...all.filter(jp), ...all.filter(s => !jp(s))];
+}
+// ---- 発音（ブラウザに入っている読み上げを使う。無料。声はスマホやパソコンによってちがう） ----
+const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+function say(text) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.9;
+    const vs = speechSynthesis.getVoices();
+    const v = vs.find(x => /^en[-_]US/i.test(x.lang)) || vs.find(x => /^en/i.test(x.lang)); if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+// ---- 熟語と例文 ----
+const WRE = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+function hasPhrase(en, phrase) {
+  const toks = [...en.matchAll(WRE)].map(m => candidates(m[0])), w = phrase.split(" ");
+  return toks.some((_, i) => w.every((x, k) => toks[i + k]?.includes(x)));
+}
+let EX = null;
+function exIndex() {
+  // 見出し語 → その言葉が出てくる [動画の番号, 文の番号]。初めて使うときに一度だけ作る
+  if (EX) return EX;
+  EX = new Map(); const memo = new Map();
+  S.videos.forEach((v, vi) => v.lines.forEach((l, li) => {
+    const seen = new Set();
+    for (const m of l.en.matchAll(WRE)) {
+      const k = m[0].toLowerCase();
+      if (!memo.has(k)) memo.set(k, lookup(k)?.head || null);
+      const h = memo.get(k); if (!h || seen.has(h)) continue;
+      seen.add(h); if (!EX.has(h)) EX.set(h, []); EX.get(h).push([vi, li]);
+    }
+  }));
+  return EX;
+}
+function examples(head, cur) {
+  // ほかの文から3つ。訳があって、長すぎず短すぎない文。できるだけ別々の動画から
+  const all = (exIndex().get(head) || []).map(([vi, li]) => ({ v: S.videos[vi], l: S.videos[vi].lines[li] }))
+    .filter(x => x.l !== cur && x.l.ja && x.l.en.length >= 25 && x.l.en.length <= 140)
+    .sort((a, b) => Math.abs(a.l.en.length - 70) - Math.abs(b.l.en.length - 70));
+  const out = [], vids = new Set();
+  for (const x of all) { if (!vids.has(x.v.id)) { out.push(x); vids.add(x.v.id); } if (out.length === 3) break; }
+  return out;
+}
+function boldWord(en, head) {
+  return esc(en).replace(WRE, m => candidates(m).includes(head) ? `<b>${m}</b>` : m);
 }
 function openSheet(el) {
   closeSheet();
@@ -306,19 +371,27 @@ function openSheet(el) {
   const all = r ? senses(r.mean) : [];
   const bg = document.createElement("div"); bg.className = "sheet-bg"; bg.id = "sheetBg";
   const sh = document.createElement("section"); sh.className = "sheet"; sh.id = "sheet"; sh.setAttribute("role", "dialog"); sh.setAttribute("aria-label", word + " の意味");
-  sh.innerHTML = `<div class="grip"></div><h2>${esc(word)}</h2>
+  const phs = r ? (S.dict._ph?.[r.head] || []).map(p => ({ p, mean: S.dict[p], in: hasPhrase(line.en, p), mine: S.dict._mine?.includes(p) }))
+    .sort((a, b) => b.in - a.in).slice(0, 4) : [];
+  const exs = r ? examples(r.head, line) : [];
+  sh.innerHTML = `<div class="grip"></div><div class="wtitle"><h2>${esc(word)}</h2><button class="say" data-say="${esc(word)}" aria-label="発音を聞く">${SPK}</button></div>
     ${r && r.head !== word.toLowerCase() ? `<div class="head">見出し: ${esc(r.head)}</div>` : ""}
     ${r ? `<ol id="senses">${all.slice(0, 4).map(s => `<li>${esc(s)}</li>`).join("")}</ol>
       ${all.length > 4 ? `<button class="textbtn" id="moreS">ほかの意味 ${all.length - 4}個</button>` : ""}`
       : `<p class="note">この辞書には見つかりませんでした。人の名前や固有名詞かもしれません。</p>`}
+    ${phs.length ? `<h3>熟語</h3><ul class="phr">${phs.map(x => `<li><button class="say sm" data-say="${esc(x.p)}" aria-label="${esc(x.p)} の発音">${SPK}</button><b>${esc(x.p)}${x.mine ? "＊" : ""}${x.in ? `<span class="in">この文</span>` : ""}</b><span class="pm">${esc(senses(x.mean).slice(0, 2).join(" / "))}</span></li>`).join("")}</ul>
+      ${phs.some(x => x.mine) ? `<p class="small" style="margin:6px 0 0">＊は Claude が作った熟語の一覧から（辞書ではないので、まちがいがあるかもしれません）</p>` : ""}` : ""}
+    <h3>この文</h3>
     <div class="ctx">${wordsHTML(line.en).replace(new RegExp(`>${word}<`), `><b>${esc(word)}</b><`)}${line.ja ? `<br>${esc(line.ja)}` : ""}</div>
+    ${exs.length ? `<h3>ほかの動画の例文</h3><ul class="ex">${exs.map(x => `<li><button class="say sm" data-say="${esc(x.l.en)}" aria-label="例文を聞く" style="float:right;margin-left:8px">${SPK}</button>${boldWord(x.l.en, r.head)}<div class="ej">${esc(x.l.ja)}</div><button class="src" data-goto="${x.v.id}" data-t="${x.l.s}">${esc(x.v.ja)} ${mmss(x.l.s)}</button></li>`).join("")}</ul>` : ""}
     <div class="row">${r ? `<span class="saved">単語帳に入れました</span>` : ""}
       <a class="textbtn" href="https://ejje.weblio.jp/content/${encodeURIComponent(r ? r.head : word.toLowerCase())}" target="_blank" rel="noopener">Weblio で詳しく</a>
       <button class="primary" id="closeS" style="margin-left:auto">閉じる</button></div>`;
   document.body.append(bg, sh);
+  say(word);
   bg.onclick = closeSheet; $("#closeS").onclick = closeSheet;
   const more = $("#moreS"); if (more) more.onclick = () => { $("#senses").innerHTML = all.map(s => `<li>${esc(s)}</li>`).join(""); more.remove(); };
-  $("#closeS").focus();
+  $("#closeS").focus({ preventScroll: true }); // 板が長いので、意味が見える上のほうから見せる
   if (r) {
     const id = r.head.replace(/[^a-z0-9_.~:@+-]/g, "-");
     const old = S.words[id] || {};
@@ -433,6 +506,14 @@ document.addEventListener("click", e => {
   const chip = t.closest("[data-topic]"); if (chip) { S.topic = chip.dataset.topic; return render(); }
   const vrow = t.closest("[data-vid]"); if (vrow) { S.video = S.videos.find(v => v.id === vrow.dataset.vid); return render(); }
   const w = t.closest(".lines .w"); if (w) return openSheet(w);
+  const sy = t.closest("[data-say]"); if (sy) return say(sy.dataset.say);
+  const go = t.closest("[data-goto]");
+  if (go) {
+    const v = S.videos.find(x => x.id === go.dataset.goto), at = +go.dataset.t; if (!v) return;
+    closeSheet(); stopPlayer(); S.tab = "videos"; S.video = v; render();
+    setTimeout(() => player?.seekTo?.(at + shiftOf(v.id), true), 1500);
+    return;
+  }
   const seek = t.closest("[data-seek]"); if (seek) { S.cur = -1; userScrollAt = 0; player?.seekTo(+seek.dataset.seek + shiftOf(S.video.id), true); player?.playVideo(); return; }
   const sb = t.closest("[data-shift]"); if (sb) { const id = S.video.id, n = Math.round((shiftOf(id) + +sb.dataset.shift) * 2) / 2; pref("shift-" + id, n); S.cur = -1; $("#shiftv").textContent = shiftLabel(n); return; }
   const sj = t.closest("[data-showjp]"); if (sj) { sj.previousElementSibling.hidden = false; sj.remove(); return; }
