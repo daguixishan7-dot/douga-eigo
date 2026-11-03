@@ -436,6 +436,10 @@ function renderSettings(main) {
       <p class="note">${LOCAL ? "家の Wi-Fi（動画が一緒に動きます）" : EMBED ? "公開ページ（動画が一緒に動きます）" : "claude.ai（ページの中では動画を再生できないので、時間を押すと YouTube が開きます）"}</p></div>
     <div class="set"><h3>単語帳の置き場所</h3><p class="note">${where}</p>
       <p class="small">開き方ごとに単語帳は別々です。</p></div>
+    ${S.locked || S.privateN ? `<div class="set"><h3>自分用の動画（TED 以外）</h3>
+      ${S.privateN ? `<p class="note">${S.privateN}本を表示しています。</p>` : `<p class="small">合言葉を入れると、カギのかかった動画が見られます（このブラウザが覚えます）。</p>
+      <form id="keyF" style="display:flex;gap:8px"><input id="keyI" autocomplete="off" aria-label="合言葉" style="flex:1;min-height:44px;font-size:16px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)"><button class="primary">開く</button></form>
+      <p class="small" id="keyMsg"></p>`}</div>` : ""}
     <div class="set"><h3>出どころ</h3>
       <p class="small">字幕: TED の英語字幕と、TED Translators の日本語訳（訳した人の名前は動画ごとに表示）。TED Talks は <a href="https://www.ted.com/about/our-organization/our-policies-terms/ted-talks-usage-policy" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a> で公開されています。
       辞書: <a href="https://github.com/kujirahand/EJDict" target="_blank" rel="noopener">EJDict</a>（くじらはんど、CC0）。英語の勉強のための個人のページで、広告や収入はありません。</p></div>
@@ -529,6 +533,13 @@ function renderCtrl() {
 }
 
 // ---- 押したとき ----
+document.addEventListener("submit", async e => {
+  if (e.target.id !== "keyF") return;
+  e.preventDefault();
+  $("#keyMsg").textContent = "確かめています…";
+  const ok = await unlock($("#keyI").value.trim());
+  if (ok) render(); else $("#keyMsg").textContent = "合言葉がちがうようです。";
+});
 document.addEventListener("click", e => {
   const t = e.target;
   const tab = t.closest(".tabs button"); if (tab) return setTab(tab.dataset.tab);
@@ -578,10 +589,34 @@ document.addEventListener("keydown", e => {
 $("#main").addEventListener("wheel", () => userScrollAt = Date.now(), { passive: true });
 $("#main").addEventListener("touchmove", () => userScrollAt = Date.now(), { passive: true });
 
+// ---- カギのかかった自分用の動画（data/private.bin）。tools/build_public.py の lock() と対になる ----
+// 合言葉はリンクの # のあと（#k=合言葉）か、設定で入れる。# のあとはサーバーに送られない
+async function unlock(given) {
+  const m = location.hash.match(/k=([\w-]+)/);
+  if (m) { pref("key", m[1]); history.replaceState(null, "", location.pathname + location.search); }
+  const pass = given || pref("key");
+  let buf;
+  try { const r = await fetch("data/private.bin"); if (!r.ok) return false; buf = new Uint8Array(await r.arrayBuffer()); } catch (e) { return false; }
+  S.locked = true;
+  if (!pass || S.privateN) return false;
+  try {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: buf.slice(0, 16), iterations: 200000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const zip = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(16, 28) }, key, buf.slice(28));
+    const text = await new Response(new Blob([zip]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+    const more = JSON.parse(text);
+    S.videos = [...S.videos, ...more].sort((a, b) => a.wpm * Math.sqrt(a.dur) - b.wpm * Math.sqrt(b.dur));
+    S.privateN = more.length; EX = null;
+    pref("key", pass);
+    return true;
+  } catch (e) { return false; }  // 合言葉がちがう
+}
+
 (async () => {
   try {
     const [v, d] = await Promise.all([fetch("data/videos.json").then(r => r.json()), fetch("data/dict.json").then(r => r.json())]);
     S.videos = v; S.dict = d;
+    await unlock();
   } catch (e) {
     $("#main").innerHTML = `<div class="pad"><p class="note">字幕のデータを読めませんでした。ページを開き直してください。</p></div>`;
     return;
