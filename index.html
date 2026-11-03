@@ -1,0 +1,475 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0}[hidden]{display:none!important}</style></head><body><title>英語の動画帳</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* アプリの形: 上に見出し、下に3つの切り替え。動画の画面だけは下に再生の操作。色は「字幕の黄色」を今の文と押した単語の印にだけ使う */
+:root {
+  --bg: #ffffff;
+  --fg: #111418;
+  --sub: #5a6068;
+  --line: #e3e5e8;
+  --mark: #fff2a8;      /* 字幕の黄色（今の文・押した単語） */
+  --mark-fg: #111418;
+  --btn: #111418;
+  --btn-fg: #ffffff;
+  --chip: #f1f2f4;
+  --ok: #1e7a3c;
+  --font: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #000000; --fg: #eef0f2; --sub: #9aa1a9; --line: #2a2d31; --mark: #5c4d00; --mark-fg: #fff6c8;
+  --btn: #eef0f2; --btn-fg: #000000; --chip: #1c1e21; --ok: #5ccf83; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #000000; --fg: #eef0f2; --sub: #9aa1a9; --line: #2a2d31; --mark: #5c4d00; --mark-fg: #fff6c8;
+  --btn: #eef0f2; --btn-fg: #000000; --chip: #1c1e21; --ok: #5ccf83; color-scheme: dark }
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 17px/1.55 var(--font); -webkit-text-size-adjust: 100%; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+.app { display: flex; flex-direction: column; height: 100%; }
+.app > .col { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+  display: flex; align-items: center; gap: 8px; min-height: 56px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.top h1 { font-size: 17px; font-weight: 700; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top .back { width: 48px; height: 48px; margin-left: -12px; display: grid; place-items: center; }
+.main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.big { font-size: 34px; font-weight: 800; letter-spacing: -0.01em; margin: 16px 0 4px; }
+.note { font-size: 15px; color: var(--sub); }
+.small { font-size: 13px; color: var(--sub); }
+
+/* 下の切り替え */
+.tabs { display: flex; border-top: 1px solid var(--line); background: var(--bg);
+  padding: 0 max(0px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(0px, env(safe-area-inset-left, 0px)); }
+.tabs button { flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 13px; color: var(--sub); }
+.tabs button[aria-current="page"] { color: var(--fg); font-weight: 700; }
+.tabs svg { width: 24px; height: 24px; }
+
+/* 話題の切り替え */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-block: 8px 12px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; min-height: 40px; padding: 0 16px; border-radius: 999px; background: var(--chip); font-size: 15px; }
+.chip[aria-pressed="true"] { background: var(--btn); color: var(--btn-fg); }
+
+/* 動画の一覧（箱で囲まず、線で区切る） */
+.list { list-style: none; margin: 0; padding: 0; }
+.vrow { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; width: 100%; text-align: left; padding: 14px 0; border-bottom: 1px solid var(--line); min-height: 48px; }
+.vrow .ja { font-weight: 700; grid-column: 1 / -1; }
+.vrow .en { font-size: 15px; color: var(--sub); grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.tag { border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.speed { display: inline-flex; align-items: center; gap: 6px; }
+.speed i { display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: var(--chip); position: relative; overflow: hidden; }
+.speed i b { position: absolute; inset: 0 auto 0 0; background: var(--sub); border-radius: 3px; }
+
+/* 動画の画面 */
+.player { background: #000; aspect-ratio: 16 / 9; width: 100%; max-width: 100%; position: sticky; top: 0; z-index: 4; }
+.player iframe, .player > div { width: 100%; height: 100%; display: block; border: 0; }
+.open-yt { display: flex; gap: 12px; align-items: center; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.primary { min-height: 48px; padding: 0 22px; border-radius: 999px; background: var(--btn); color: var(--btn-fg); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.lines { list-style: none; margin: 0; padding: 0 0 24px; }
+.ln { display: grid; grid-template-columns: 52px 1fr; gap: 0 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ln.now { background: linear-gradient(var(--mark), var(--mark)) no-repeat; background-size: 4px 100%; }
+.ln .t { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; min-height: 48px; text-align: left; padding: 6px 0 0; text-decoration: none; display: block; align-self: start; }
+.ln .body { min-width: 0; }
+.ln .en { font-size: 19px; line-height: 1.6; }
+.ln.now .en { font-weight: 600; }
+.w { border-radius: 4px; cursor: pointer; padding: 1px 0; }
+.w:hover { background: var(--chip); }
+.w.hit { background: var(--mark); color: var(--mark-fg); }
+.ln .jp { font-size: 15px; color: var(--sub); margin-top: 4px; }
+.ln .jp-btn { font-size: 13px; color: var(--sub); min-height: 36px; padding: 0 12px; margin-top: 4px; border: 1px solid var(--line); border-radius: 999px; }
+.ln .jp[hidden] + .jp-btn { display: inline-flex; align-items: center; }
+
+/* 再生の操作（家の Wi-Fi で開いたときだけ） */
+.ctrl { display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--line); background: var(--bg);
+  padding: 4px max(8px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+.ctrl button { min-width: 56px; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; color: var(--sub); gap: 1px; border-radius: 12px; }
+.ctrl button svg { width: 26px; height: 26px; color: var(--fg); }
+.ctrl button[aria-pressed="true"] { background: var(--mark); color: var(--mark-fg); }
+.ctrl button[aria-pressed="true"] svg { color: var(--mark-fg); }
+.ctrl .play svg { width: 34px; height: 34px; }
+
+/* 単語の板（下から出る） */
+.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--bg); border-radius: 16px 16px 0 0; max-height: 70%; overflow-y: auto;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.sheet .grip { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 12px; }
+.sheet h2 { font-size: 28px; margin: 0; font-weight: 800; }
+.sheet .head { font-size: 15px; color: var(--sub); }
+.sheet ol { margin: 12px 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.sheet .ctx { font-size: 15px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
+.sheet .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.textbtn { min-height: 48px; padding: 0 8px; font-size: 15px; text-decoration: underline; text-underline-offset: 3px; }
+.saved { font-size: 13px; color: var(--ok); }
+
+/* 単語帳 */
+.wrow { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.wrow > button { width: 100%; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; min-height: 48px; }
+.wrow .word { font-weight: 700; font-size: 19px; }
+.wrow .cnt { font-size: 13px; color: var(--sub); align-self: center; font-variant-numeric: tabular-nums; }
+.wrow .mean { grid-column: 1 / -1; font-size: 15px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.wrow .more { padding-top: 8px; display: grid; gap: 6px; font-size: 15px; }
+.wrow.done .word { color: var(--sub); text-decoration: line-through; }
+.empty { padding: 48px 0; text-align: center; color: var(--sub); }
+
+/* 設定 */
+.set { border-bottom: 1px solid var(--line); padding: 14px 0; display: grid; gap: 8px; }
+.set h3 { font-size: 17px; margin: 0; }
+.seg { display: flex; background: var(--chip); border-radius: 12px; padding: 3px; }
+.seg button { flex: 1; min-height: 44px; border-radius: 10px; font-size: 15px; }
+.seg button[aria-pressed="true"] { background: var(--bg); font-weight: 700; box-shadow: 0 0 0 1px var(--line); }
+code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius: 6px; word-break: break-all; }
+
+@media (min-width: 900px) {
+  .app { flex-direction: row-reverse; }
+  .tabs { flex-direction: column; justify-content: flex-start; border-top: 0; border-right: 1px solid var(--line); width: 88px; padding-top: 12px; }
+  .tabs button { flex: none; min-height: 72px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+
+<div class="app">
+  <div class="col">
+    <header class="top" id="top"><h1 id="topTitle">英語の動画帳</h1></header>
+    <main class="main" id="main"><div class="pad"><p class="note">読み込んでいます…</p></div></main>
+    <nav class="ctrl" id="ctrl" hidden></nav>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="切り替え">
+    <button data-tab="videos" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>動画</button>
+    <button data-tab="words">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>単語帳</button>
+    <button data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>設定</button>
+  </nav>
+</div>
+
+<script>
+// 家の Wi-Fi（このパソコンの serve.py）か GitHub Pages で開いたときは、YouTube をページの中で再生できる。claude.ai ではできない
+const LOCAL = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+const EMBED = LOCAL || location.hostname.endsWith("github.io");
+
+// 形が変わる動詞など。tools/build.py の IRREG と同じ中身にする
+const IRREG = {am:"be",is:"be",are:"be",was:"be",were:"be",been:"be",being:"be",has:"have",had:"have",does:"do",did:"do",done:"do",
+  went:"go",gone:"go",made:"make",said:"say",got:"get",gotten:"get",took:"take",taken:"take",came:"come",saw:"see",seen:"see",
+  knew:"know",known:"know",thought:"think",told:"tell",found:"find",gave:"give",given:"give",became:"become",began:"begin",begun:"begin",
+  brought:"bring",bought:"buy",built:"build",felt:"feel",kept:"keep",left:"leave",lost:"lose",meant:"mean",met:"meet",paid:"pay",
+  ran:"run",sent:"send",spent:"spend",stood:"stand",taught:"teach",understood:"understand",won:"win",wrote:"write",written:"write",
+  spoke:"speak",spoken:"speak",heard:"hear",held:"hold",led:"lead",fell:"fall",fallen:"fall",grew:"grow",grown:"grow",drew:"draw",
+  children:"child",people:"person",men:"man",women:"woman",better:"good",best:"good",worse:"bad",worst:"bad",mice:"mouse",feet:"foot",teeth:"tooth"};
+const SUF = [["ies","y"],["ied","y"],["ier","y"],["iest","y"],["es",""],["s",""],["ed",""],["ed","e"],["d",""],["ing",""],["ing","e"],["er",""],["est",""],["ly",""],["ily","y"]];
+function candidates(word) {
+  let w = word.toLowerCase().replace(/’/g, "'").replace(/'(s|d|ll|re|ve|m)$/, "").replace(/n't$/, "");
+  const out = [w];
+  if (IRREG[w]) out.push(IRREG[w]);
+  for (const [suf, rep] of SUF) {
+    if (w.endsWith(suf) && w.length - suf.length >= 2) {
+      const stem = w.slice(0, -suf.length) + rep;
+      out.push(stem);
+      if (rep === "" && stem.length >= 3 && stem.at(-1) === stem.at(-2) && !"aeiou".includes(stem.at(-1))) out.push(stem.slice(0, -1));
+    }
+  }
+  return [...new Set(out)];
+}
+
+const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", video: null, jpMode: "always", rate: 1, repeat: false, cur: -1 };
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function pref(k, v) { try { if (v === undefined) return localStorage.getItem("douga-" + k); localStorage.setItem("douga-" + k, v); } catch (e) { return null; } }
+S.jpMode = pref("jp") || "always";
+
+// ---- 単語帳の置き場所: claude.ai では db、家の Wi-Fi では serve.py、どちらも無ければこのブラウザ ----
+const Store = {
+  kind: "browser", db: null,
+  async init() {
+    if (LOCAL) {
+      try { const r = await fetch("api/words"); if (r.ok) { this.kind = "local"; S.words = await r.json(); return; } } catch (e) {}
+    }
+    try { S.words = JSON.parse(pref("words") || "{}"); } catch (e) { S.words = {}; }
+    if (window.claude?.use) {
+      const db = await window.claude.use("db").catch(() => null);
+      if (db) {
+        this.kind = "db"; this.db = db;
+        db.collection("words").onSnapshot(snap => {
+          S.words = {}; snap.docs.forEach(d => { S.words[d.id] = d.data(); });
+          if (S.tab === "words" && !S.video) render();
+        }, () => {});
+      }
+    }
+  },
+  async put(id, doc) {
+    S.words[id] = doc;
+    try {
+      if (this.kind === "db") await this.db.collection("words").doc(id).set(doc);
+      else if (this.kind === "local") await fetch("api/words/" + encodeURIComponent(id), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc) });
+      else pref("words", JSON.stringify(S.words));
+    } catch (e) { console.warn("単語帳に書けませんでした", e); }
+  },
+  async del(id) {
+    delete S.words[id];
+    try {
+      if (this.kind === "db") await this.db.collection("words").doc(id).delete();
+      else if (this.kind === "local") await fetch("api/words/" + encodeURIComponent(id), { method: "DELETE" });
+      else pref("words", JSON.stringify(S.words));
+    } catch (e) {}
+  },
+};
+
+// ---- 画面 ----
+function setTab(tab) {
+  S.tab = tab; S.video = null; stopPlayer();
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
+  render();
+}
+function render() {
+  const main = $("#main");
+  $("#tabs").hidden = !!S.video && innerWidth < 900;
+  $("#ctrl").hidden = !(S.video && EMBED);
+  if (S.video) return renderVideo(main);
+  $("#top").innerHTML = `<h1>${{ videos: "英語の動画帳", words: "単語帳", settings: "設定" }[S.tab]}</h1>`;
+  if (S.tab === "videos") renderList(main);
+  else if (S.tab === "words") renderWords(main);
+  else renderSettings(main);
+  main.scrollTop = 0;
+}
+
+function renderList(main) {
+  const topics = ["すべて", ...new Set(S.videos.map(v => v.topic))];
+  const maxW = Math.max(...S.videos.map(v => v.wpm), 200);
+  const vs = S.videos.filter(v => S.topic === "すべて" || v.topic === S.topic);
+  main.innerHTML = `<div class="pad wrap">
+    <p class="note" style="margin:12px 0 0">聞きやすい順（話す速さと長さ）。単語を押すと意味が出ます。</p>
+    <div class="chips" role="group" aria-label="話題">${topics.map(t => `<button class="chip" aria-pressed="${t === S.topic}" data-topic="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+    <ul class="list">${vs.map(v => `<li><button class="vrow" data-vid="${v.id}">
+      <span class="ja">${esc(v.ja)}</span><span class="en">${esc(v.title)}</span>
+      <span class="meta"><span class="tag">${esc(v.topic)}</span><span>${mmss(v.dur)}</span>
+        <span class="speed" title="1分あたりの語数">速さ <i><b style="width:${Math.round(v.wpm / maxW * 100)}%"></b></i>${v.wpm}語/分</span></span>
+    </button></li>`).join("")}</ul>
+    <p class="small" style="margin:16px 0 24px">字幕は TED の英語字幕と、ボランティアの日本語訳です。</p>
+  </div>`;
+}
+
+function renderVideo(main) {
+  const v = S.video;
+  $("#top").innerHTML = `<button class="back" id="back" aria-label="一覧へ戻る"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>${esc(v.ja)}</h1>`;
+  $("#back").onclick = () => { S.video = null; stopPlayer(); render(); };
+  const yt = t => `https://www.youtube.com/watch?v=${v.id}&t=${Math.floor(t)}s`;
+  main.innerHTML = `${EMBED ? `<div class="player"><div id="yt"></div></div>` : ""}
+  <div class="pad wrap">
+    ${EMBED ? "" : `<div class="open-yt"><a class="primary" href="${yt(0)}" target="_blank" rel="noopener">YouTube で見る</a><span class="small">時間を押すと、その場面から開きます</span></div>`}
+    <p class="small" style="margin:12px 0 0">${esc(v.title)}<br>${esc(v.credit)}</p>
+    <ol class="lines" id="lines">${v.lines.map((l, i) => `<li class="ln" data-i="${i}">
+      ${EMBED ? `<button class="t" data-seek="${l.s}">${mmss(l.s)}</button>` : `<a class="t" href="${yt(l.s)}" target="_blank" rel="noopener">${mmss(l.s)}</a>`}
+      <div class="body"><div class="en">${wordsHTML(l.en)}</div>
+      ${S.jpMode === "never" ? "" : `<div class="jp" ${S.jpMode === "tap" ? "hidden" : ""}>${esc(l.ja || "（この文の訳はありません）")}</div>${S.jpMode === "tap" ? `<button class="jp-btn" data-showjp>訳を見る</button>` : ""}`}
+      </div></li>`).join("")}</ol>
+  </div>`;
+  main.scrollTop = 0;
+  if (EMBED) { renderCtrl(); startPlayer(v); }
+}
+function wordsHTML(text) {
+  return esc(text).replace(/[A-Za-z]+(?:['’][A-Za-z]+)*/g, m => `<span class="w" role="button" tabindex="0">${m}</span>`);
+}
+
+// ---- 単語の板 ----
+function lookup(word) {
+  for (const c of candidates(word)) if (S.dict[c]) return { head: c, mean: S.dict[c] };
+  return null;
+}
+function senses(mean) {
+  // 「answer」「ampere」のような略語の言いかえ（日本語を含まない意味）は後ろへ回す
+  const all = mean.replace(/『|』/g, "").split(" / ").map(s => s.trim()).filter(Boolean);
+  const jp = s => /[぀-ヿ一-鿿]/.test(s);
+  return [...all.filter(jp), ...all.filter(s => !jp(s))];
+}
+function openSheet(el) {
+  closeSheet();
+  if (EMBED && player?.pauseVideo) player.pauseVideo();
+  el.classList.add("hit");
+  const word = el.textContent;
+  const li = el.closest(".ln"); const line = S.video.lines[+li.dataset.i];
+  const r = lookup(word);
+  const all = r ? senses(r.mean) : [];
+  const bg = document.createElement("div"); bg.className = "sheet-bg"; bg.id = "sheetBg";
+  const sh = document.createElement("section"); sh.className = "sheet"; sh.id = "sheet"; sh.setAttribute("role", "dialog"); sh.setAttribute("aria-label", word + " の意味");
+  sh.innerHTML = `<div class="grip"></div><h2>${esc(word)}</h2>
+    ${r && r.head !== word.toLowerCase() ? `<div class="head">見出し: ${esc(r.head)}</div>` : ""}
+    ${r ? `<ol id="senses">${all.slice(0, 4).map(s => `<li>${esc(s)}</li>`).join("")}</ol>
+      ${all.length > 4 ? `<button class="textbtn" id="moreS">ほかの意味 ${all.length - 4}個</button>` : ""}`
+      : `<p class="note">この辞書には見つかりませんでした。人の名前や固有名詞かもしれません。</p>`}
+    <div class="ctx">${wordsHTML(line.en).replace(new RegExp(`>${word}<`), `><b>${esc(word)}</b><`)}${line.ja ? `<br>${esc(line.ja)}` : ""}</div>
+    <div class="row">${r ? `<span class="saved">単語帳に入れました</span>` : ""}
+      <a class="textbtn" href="https://ejje.weblio.jp/content/${encodeURIComponent(r ? r.head : word.toLowerCase())}" target="_blank" rel="noopener">Weblio で詳しく</a>
+      <button class="primary" id="closeS" style="margin-left:auto">閉じる</button></div>`;
+  document.body.append(bg, sh);
+  bg.onclick = closeSheet; $("#closeS").onclick = closeSheet;
+  const more = $("#moreS"); if (more) more.onclick = () => { $("#senses").innerHTML = all.map(s => `<li>${esc(s)}</li>`).join(""); more.remove(); };
+  $("#closeS").focus();
+  if (r) {
+    const id = r.head.replace(/[^a-z0-9_.~:@+-]/g, "-");
+    const old = S.words[id] || {};
+    Store.put(id, { head: r.head, mean: all.slice(0, 3).join(" / "), en: line.en, ja: line.ja || "", vid: S.video.id, t: line.s,
+      n: (old.n || 0) + 1, done: false, at: new Date().toISOString(), first: old.first || new Date().toISOString() });
+  }
+}
+function closeSheet() {
+  $("#sheet")?.remove(); $("#sheetBg")?.remove();
+  document.querySelectorAll(".w.hit").forEach(w => w.classList.remove("hit"));
+}
+
+// ---- 単語帳 ----
+function renderWords(main) {
+  const show = pref("wshow") || "todo";
+  const list = Object.entries(S.words).filter(([, w]) => show === "all" || !w.done).sort((a, b) => (b[1].at || "").localeCompare(a[1].at || ""));
+  const total = Object.keys(S.words).length, done = Object.values(S.words).filter(w => w.done).length;
+  main.innerHTML = `<div class="pad wrap">
+    <p class="note" style="margin:12px 0 8px">調べた単語は自動でここに入ります。${total}語のうち ${done}語 覚えた。</p>
+    <div class="seg" role="group" aria-label="表示">${[["todo", "まだ"], ["all", "すべて"]].map(([k, l]) => `<button data-wshow="${k}" aria-pressed="${show === k}">${l}</button>`).join("")}</div>
+    ${list.length ? `<ul class="list">${list.map(([id, w]) => `<li class="wrow ${w.done ? "done" : ""}" data-id="${esc(id)}">
+      <button data-open><span class="word">${esc(w.head)}</span><span class="cnt">${w.n}回</span><span class="mean">${esc(w.mean)}</span></button>
+      <div class="more" hidden>
+        <div>${esc(w.en)}</div><div class="small">${esc(w.ja)}</div>
+        <div class="row" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <button class="primary" data-done>${w.done ? "まだにもどす" : "覚えた"}</button>
+          ${EMBED ? `<button class="textbtn" data-jump>この場面を見る</button>` : `<a class="textbtn" href="https://www.youtube.com/watch?v=${esc(w.vid)}&t=${Math.floor(w.t)}s" target="_blank" rel="noopener">この場面を見る</a>`}
+          <button class="textbtn" data-del>消す</button></div>
+      </div></li>`).join("")}</ul>`
+      : `<p class="empty">${total ? "まだの単語はありません。" : "動画の字幕で単語を押すと、ここにたまります。"}</p>`}
+  </div>`;
+}
+
+// ---- 設定 ----
+function renderSettings(main) {
+  const where = { db: "claude.ai（どの端末からでも同じ）", local: "このパソコンの douga-eigo/data/words.json", browser: "このブラウザの中だけ" }[Store.kind];
+  main.innerHTML = `<div class="pad wrap">
+    <div class="set"><h3>日本語訳</h3>
+      <div class="seg" role="group" aria-label="日本語訳の出し方">${[["always", "いつも出す"], ["tap", "押したら出す"], ["never", "出さない"]].map(([k, l]) => `<button data-jp="${k}" aria-pressed="${S.jpMode === k}">${l}</button>`).join("")}</div>
+      <p class="small">英語だけで聞き取れるか試すときは「押したら出す」が便利です。</p></div>
+    <div class="set"><h3>いまの開き方</h3>
+      <p class="note">${LOCAL ? "家の Wi-Fi（動画が一緒に動きます）" : EMBED ? "公開ページ（動画が一緒に動きます）" : "claude.ai（ページの中では動画を再生できないので、時間を押すと YouTube が開きます）"}</p></div>
+    <div class="set"><h3>単語帳の置き場所</h3><p class="note">${where}</p>
+      <p class="small">開き方ごとに単語帳は別々です。</p></div>
+    <div class="set"><h3>出どころ</h3>
+      <p class="small">字幕: TED の英語字幕と、TED Translators の日本語訳（訳した人の名前は動画ごとに表示）。TED Talks は <a href="https://www.ted.com/about/our-organization/our-policies-terms/ted-talks-usage-policy" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a> で公開されています。
+      辞書: <a href="https://github.com/kujirahand/EJDict" target="_blank" rel="noopener">EJDict</a>（くじらはんど、CC0）。英語の勉強のための個人のページで、広告や収入はありません。</p></div>
+  </div>`;
+}
+
+// ---- 再生（家の Wi-Fi のときだけ） ----
+let player = null, timer = null, ytReady = null;
+function loadYT() {
+  if (!ytReady) ytReady = new Promise(res => {
+    window.onYouTubeIframeAPIReady = res;
+    const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; document.head.append(s);
+  });
+  return ytReady;
+}
+async function startPlayer(v) {
+  await loadYT();
+  if (S.video !== v) return;
+  player = new YT.Player("yt", { videoId: v.id, playerVars: { playsinline: 1, rel: 0, cc_load_policy: 0, origin: location.origin },
+    events: { onReady: () => player.setPlaybackRate(S.rate), onStateChange: renderCtrl } });
+  S.cur = -1;
+  timer = setInterval(tick, 250);
+}
+function stopPlayer() { clearInterval(timer); timer = null; try { player?.destroy(); } catch (e) {} player = null; }
+let userScrollAt = 0;
+function tick() {
+  if (!player?.getCurrentTime) return;
+  const t = player.getCurrentTime(), L = S.video.lines;
+  if (S.repeat && S.cur >= 0 && t >= L[S.cur].e - 0.05) { player.seekTo(L[S.cur].s, true); return; }
+  let i = L.findIndex((l, k) => t >= l.s && (k === L.length - 1 || t < L[k + 1].s));
+  if (i === S.cur || i < 0) return;
+  S.cur = i;
+  document.querySelectorAll(".ln.now").forEach(e => e.classList.remove("now"));
+  const li = document.querySelector(`.ln[data-i="${i}"]`); if (!li) return;
+  li.classList.add("now");
+  if (Date.now() - userScrollAt > 4000) {
+    const main = $("#main"), pl = $(".player");
+    main.scrollTo({ top: li.offsetTop - (pl ? pl.offsetHeight : 0) - 8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+}
+function seekLine(d) {
+  const L = S.video.lines; const i = Math.min(L.length - 1, Math.max(0, (S.cur < 0 ? 0 : S.cur) + d));
+  S.cur = -1; player?.seekTo(L[i].s, true); player?.playVideo(); userScrollAt = 0;
+}
+const IC = {
+  prev: '<path d="M6 5v14M19 5l-9 7 9 7z" fill="currentColor"/>',
+  next: '<path d="M18 5v14M5 5l9 7-9 7z" fill="currentColor"/>',
+  play: '<path d="M8 5l12 7-12 7z" fill="currentColor"/>',
+  pause: '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/>',
+  rep: '<path d="M4 12a6 6 0 0 1 6-6h8m0 0-3-3m3 3-3 3M20 12a6 6 0 0 1-6 6H6m0 0 3 3m-3-3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+function renderCtrl() {
+  if (!S.video || !EMBED) return;
+  const playing = player?.getPlayerState?.() === 1;
+  $("#ctrl").innerHTML = `
+    <button data-c="prev" aria-label="前の文"><svg viewBox="0 0 24 24">${IC.prev}</svg>前の文</button>
+    <button data-c="rep" aria-pressed="${S.repeat}"><svg viewBox="0 0 24 24">${IC.rep}</svg>1文くり返し</button>
+    <button data-c="play" class="play" aria-label="${playing ? "止める" : "再生"}"><svg viewBox="0 0 24 24">${playing ? IC.pause : IC.play}</svg></button>
+    <button data-c="rate" aria-label="速さ"><svg viewBox="0 0 24 24"><text x="12" y="16.5" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" font-family="system-ui">${S.rate}x</text></svg>速さ</button>
+    <button data-c="next" aria-label="次の文"><svg viewBox="0 0 24 24">${IC.next}</svg>次の文</button>`;
+}
+
+// ---- 押したとき ----
+document.addEventListener("click", e => {
+  const t = e.target;
+  const tab = t.closest(".tabs button"); if (tab) return setTab(tab.dataset.tab);
+  const chip = t.closest("[data-topic]"); if (chip) { S.topic = chip.dataset.topic; return render(); }
+  const vrow = t.closest("[data-vid]"); if (vrow) { S.video = S.videos.find(v => v.id === vrow.dataset.vid); return render(); }
+  const w = t.closest(".lines .w"); if (w) return openSheet(w);
+  const seek = t.closest("[data-seek]"); if (seek) { S.cur = -1; userScrollAt = 0; player?.seekTo(+seek.dataset.seek, true); player?.playVideo(); return; }
+  const sj = t.closest("[data-showjp]"); if (sj) { sj.previousElementSibling.hidden = false; sj.remove(); return; }
+  const c = t.closest("[data-c]");
+  if (c) {
+    const k = c.dataset.c;
+    if (k === "play") { player?.getPlayerState?.() === 1 ? player.pauseVideo() : player?.playVideo(); }
+    if (k === "prev") seekLine(-1);
+    if (k === "next") seekLine(1);
+    if (k === "rep") { S.repeat = !S.repeat; renderCtrl(); }
+    if (k === "rate") { S.rate = { 1: 0.75, 0.75: 0.5, 0.5: 1 }[S.rate]; player?.setPlaybackRate(S.rate); renderCtrl(); }
+    return;
+  }
+  const jp = t.closest("[data-jp]"); if (jp) { S.jpMode = jp.dataset.jp; pref("jp", S.jpMode); return render(); }
+  const ws = t.closest("[data-wshow]"); if (ws) { pref("wshow", ws.dataset.wshow); return render(); }
+  const row = t.closest(".wrow");
+  if (row) {
+    const id = row.dataset.id, w0 = S.words[id];
+    if (t.closest("[data-open]")) { const m = $(".more", row); m.hidden = !m.hidden; return; }
+    if (t.closest("[data-done]")) { Store.put(id, { ...w0, done: !w0.done }); return render(); }
+    if (t.closest("[data-del]")) { Store.del(id); return render(); }
+    if (t.closest("[data-jump]")) {
+      const v = S.videos.find(x => x.id === w0.vid); if (!v) return;
+      S.tab = "videos"; S.video = v; render();
+      setTimeout(() => player?.seekTo?.(w0.t, true), 1500);
+    }
+  }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeSheet();
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("w")) { e.preventDefault(); openSheet(e.target); }
+});
+$("#main").addEventListener("wheel", () => userScrollAt = Date.now(), { passive: true });
+$("#main").addEventListener("touchmove", () => userScrollAt = Date.now(), { passive: true });
+
+(async () => {
+  try {
+    const [v, d] = await Promise.all([fetch("data/videos.json").then(r => r.json()), fetch("data/dict.json").then(r => r.json())]);
+    S.videos = v; S.dict = d;
+  } catch (e) {
+    $("#main").innerHTML = `<div class="pad"><p class="note">字幕のデータを読めませんでした。ページを開き直してください。</p></div>`;
+    return;
+  }
+  render();
+  await Store.init();
+  if (S.tab !== "videos" || S.video) render();
+})();
+</script>
+</body></html>
