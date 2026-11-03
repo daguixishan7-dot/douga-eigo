@@ -68,7 +68,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 
 /* 動画の画面 */
 .player { background: #000; aspect-ratio: 16 / 9; width: 100%; max-width: 100%; position: sticky; top: 0; z-index: 4; }
-.player iframe, .player > div { width: 100%; height: 100%; display: block; border: 0; }
+.player iframe, .player > div, .player video { width: 100%; height: 100%; display: block; border: 0; background: #000; }
 .open-yt { display: flex; gap: 12px; align-items: center; padding-block: 12px; border-bottom: 1px solid var(--line); }
 .primary { min-height: 48px; padding: 0 22px; border-radius: 999px; background: var(--btn); color: var(--btn-fg); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .lines { list-style: none; margin: 0; padding: 0 0 24px; }
@@ -451,7 +451,36 @@ function loadYT() {
   });
   return ytReady;
 }
+// TED のサイトから取った字幕の動画は、TED の配信（HLS）を <video> で流す。YouTube の player と同じ呼び方ができるようにしておく
+let hlsLib = null;
+function loadHls() {
+  return hlsLib ||= new Promise((ok, ng) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"; sc.onload = ok; sc.onerror = ng; document.head.append(sc); });
+}
+async function videoPlayer(v) {
+  const el = document.createElement("video");
+  el.controls = true; el.playsInline = true; el.preload = "metadata";
+  $("#yt").replaceChildren(el);
+  let hls = null;
+  // hls.js を先に使う（Edge は「流せる」と答えるのに流せなかった）。使えないとき（古い iPhone など）はそのまま流す
+  await loadHls().catch(() => {});
+  if (window.Hls?.isSupported()) { hls = new Hls(); hls.loadSource(v.hls); hls.attachMedia(el); }
+  else el.src = v.hls;
+  el.playbackRate = S.rate;
+  ["play", "pause"].forEach(ev => el.addEventListener(ev, renderCtrl));
+  return {
+    getCurrentTime: () => el.currentTime, seekTo: t => { el.currentTime = t; },
+    playVideo: () => { el.play().catch(() => {}); }, pauseVideo: () => el.pause(),
+    getPlayerState: () => (el.paused ? 2 : 1), setPlaybackRate: r => { el.playbackRate = r; },
+    destroy: () => { hls?.destroy(); el.remove(); },
+  };
+}
 async function startPlayer(v) {
+  if (v.hls) {
+    const p = await videoPlayer(v);
+    if (S.video !== v) return p.destroy();
+    player = p; S.cur = -1; timer = setInterval(tick, 250); renderCtrl();
+    return;
+  }
   await loadYT();
   if (S.video !== v) return;
   player = new YT.Player("yt", { videoId: v.id, playerVars: { playsinline: 1, rel: 0, cc_load_policy: 0, origin: location.origin },
