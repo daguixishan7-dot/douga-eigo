@@ -393,7 +393,8 @@ function tick() {
   li.classList.add("now");
   if (Date.now() - userScrollAt > 4000) {
     const main = $("#main"), pl = $(".player");
-    main.scrollTo({ top: li.offsetTop - (pl ? pl.offsetHeight : 0) - 8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    const top = main.scrollTop + li.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top: top - (pl ? pl.offsetHeight : 0) - 8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
 }
 function seekLine(d) {
