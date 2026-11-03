@@ -120,6 +120,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 /* 設定 */
 .set { border-bottom: 1px solid var(--line); padding: 14px 0; display: grid; gap: 8px; }
 .set h3 { font-size: 17px; margin: 0; }
+.shift { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.shift button { min-height: 36px; padding: 0 12px; border-radius: 10px; background: var(--chip); font-size: 14px; }
+.shift b { min-width: 5em; text-align: center; font-variant-numeric: tabular-nums; }
 .seg { display: flex; background: var(--chip); border-radius: 12px; padding: 3px; }
 .seg button { flex: 1; min-height: 44px; border-radius: 10px; font-size: 15px; }
 .seg button[aria-pressed="true"] { background: var(--bg); font-weight: 700; box-shadow: 0 0 0 1px var(--line); }
@@ -182,6 +185,8 @@ const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+// 字幕と動画のずれ（秒、動画ごと）。＋なら字幕を遅らせる。TED のサイトから取った字幕は動画とずれることがあるので、手で合わせられるようにする
+const shiftOf = id => +(pref("shift-" + id) || 0);
 function pref(k, v) { try { if (v === undefined) return localStorage.getItem("douga-" + k); localStorage.setItem("douga-" + k, v); } catch (e) { return null; } }
 S.jpMode = pref("jp") || "always";
 
@@ -265,6 +270,7 @@ function renderVideo(main) {
   <div class="pad wrap">
     ${EMBED ? "" : `<div class="open-yt"><a class="primary" href="${yt(0)}" target="_blank" rel="noopener">YouTube で見る</a><span class="small">時間を押すと、その場面から開きます</span></div>`}
     <p class="small" style="margin:12px 0 0">${esc(v.title)}<br>${esc(v.credit)}</p>
+    ${EMBED ? `<div class="shift small"><span>字幕のずれ</span><button data-shift="-0.5">早める</button><b id="shiftv">${shiftLabel(shiftOf(v.id))}</b><button data-shift="0.5">遅らせる</button></div>` : ""}
     <ol class="lines" id="lines">${v.lines.map((l, i) => `<li class="ln" data-i="${i}">
       ${EMBED ? `<button class="t" data-seek="${l.s}">${mmss(l.s)}</button>` : `<a class="t" href="${yt(l.s)}" target="_blank" rel="noopener">${mmss(l.s)}</a>`}
       <div class="body"><div class="en">${wordsHTML(l.en)}</div>
@@ -274,6 +280,7 @@ function renderVideo(main) {
   main.scrollTop = 0;
   if (EMBED) { renderCtrl(); startPlayer(v); }
 }
+function shiftLabel(n) { return n === 0 ? "ぴったり" : (n > 0 ? "+" : "") + n.toFixed(1) + "秒"; }
 function wordsHTML(text) {
   return esc(text).replace(/[A-Za-z]+(?:['’][A-Za-z]+)*/g, m => `<span class="w" role="button" tabindex="0">${m}</span>`);
 }
@@ -383,8 +390,8 @@ function stopPlayer() { clearInterval(timer); timer = null; try { player?.destro
 let userScrollAt = 0;
 function tick() {
   if (!player?.getCurrentTime) return;
-  const t = player.getCurrentTime(), L = S.video.lines;
-  if (S.repeat && S.cur >= 0 && t >= L[S.cur].e - 0.05) { player.seekTo(L[S.cur].s, true); return; }
+  const sh = shiftOf(S.video.id), t = player.getCurrentTime() - sh, L = S.video.lines;
+  if (S.repeat && S.cur >= 0 && t >= L[S.cur].e - 0.05) { player.seekTo(L[S.cur].s + sh, true); return; }
   let i = L.findIndex((l, k) => t >= l.s && (k === L.length - 1 || t < L[k + 1].s));
   if (i === S.cur || i < 0) return;
   S.cur = i;
@@ -399,7 +406,7 @@ function tick() {
 }
 function seekLine(d) {
   const L = S.video.lines; const i = Math.min(L.length - 1, Math.max(0, (S.cur < 0 ? 0 : S.cur) + d));
-  S.cur = -1; player?.seekTo(L[i].s, true); player?.playVideo(); userScrollAt = 0;
+  S.cur = -1; player?.seekTo(L[i].s + shiftOf(S.video.id), true); player?.playVideo(); userScrollAt = 0;
 }
 const IC = {
   prev: '<path d="M6 5v14M19 5l-9 7 9 7z" fill="currentColor"/>',
@@ -426,7 +433,8 @@ document.addEventListener("click", e => {
   const chip = t.closest("[data-topic]"); if (chip) { S.topic = chip.dataset.topic; return render(); }
   const vrow = t.closest("[data-vid]"); if (vrow) { S.video = S.videos.find(v => v.id === vrow.dataset.vid); return render(); }
   const w = t.closest(".lines .w"); if (w) return openSheet(w);
-  const seek = t.closest("[data-seek]"); if (seek) { S.cur = -1; userScrollAt = 0; player?.seekTo(+seek.dataset.seek, true); player?.playVideo(); return; }
+  const seek = t.closest("[data-seek]"); if (seek) { S.cur = -1; userScrollAt = 0; player?.seekTo(+seek.dataset.seek + shiftOf(S.video.id), true); player?.playVideo(); return; }
+  const sb = t.closest("[data-shift]"); if (sb) { const id = S.video.id, n = Math.round((shiftOf(id) + +sb.dataset.shift) * 2) / 2; pref("shift-" + id, n); S.cur = -1; $("#shiftv").textContent = shiftLabel(n); return; }
   const sj = t.closest("[data-showjp]"); if (sj) { sj.previousElementSibling.hidden = false; sj.remove(); return; }
   const c = t.closest("[data-c]");
   if (c) {
@@ -449,7 +457,7 @@ document.addEventListener("click", e => {
     if (t.closest("[data-jump]")) {
       const v = S.videos.find(x => x.id === w0.vid); if (!v) return;
       S.tab = "videos"; S.video = v; render();
-      setTimeout(() => player?.seekTo?.(w0.t, true), 1500);
+      setTimeout(() => player?.seekTo?.(w0.t + shiftOf(v.id), true), 1500);
     }
   }
 });
