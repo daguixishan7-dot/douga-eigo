@@ -102,7 +102,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sheet h2 { font-size: 28px; margin: 0; font-weight: 800; }
 .sheet .head { font-size: 15px; color: var(--sub); }
 .sheet ol { margin: 12px 0; padding-left: 1.4em; display: grid; gap: 6px; }
-.sheet .wtitle { display: flex; align-items: center; gap: 8px; }
+.sheet .wtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.addw { margin-left: auto; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--btn); color: var(--btn-fg); font-size: 15px; font-weight: 700; }
+.addw[aria-pressed="true"] { background: var(--chip); color: var(--fg); }
 .say { width: 44px; height: 44px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--chip); flex: none; }
 .say svg { width: 22px; height: 22px; }
 .say.sm { width: 32px; height: 32px; } .say.sm svg { width: 16px; height: 16px; }
@@ -117,7 +119,6 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .sheet .ctx { font-size: 15px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
 .sheet .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .textbtn { min-height: 48px; padding: 0 8px; font-size: 15px; text-decoration: underline; text-underline-offset: 3px; }
-.saved { font-size: 13px; color: var(--ok); }
 
 /* 単語帳 */
 .wrow { border-bottom: 1px solid var(--line); padding: 12px 0; }
@@ -432,7 +433,7 @@ function openSheet(el) {
   const phs = r ? (S.dict._ph?.[r.head] || []).map(p => ({ p, mean: S.dict[p], in: hasPhrase(line.en, p), mine: S.dict._mine?.includes(p) }))
     .sort((a, b) => b.in - a.in).slice(0, 4) : [];
   const exs = r ? examples(r.head, line) : [];
-  sh.innerHTML = `<div class="grip"></div><div class="wtitle"><h2>${esc(word)}</h2><button class="say" data-say="${esc(word)}" aria-label="発音を聞く">${SPK}</button></div>
+  sh.innerHTML = `<div class="grip"></div><div class="wtitle"><h2>${esc(word)}</h2><button class="say" data-say="${esc(word)}" aria-label="発音を聞く">${SPK}</button>${r ? `<button class="addw" id="addW"></button>` : ""}</div>
     ${r && r.head !== word.toLowerCase() ? `<div class="head">見出し: ${esc(r.head)}</div>` : ""}
     ${r ? `<ol id="senses">${all.slice(0, 4).map(s => `<li>${esc(s)}</li>`).join("")}</ol>
       ${all.length > 4 ? `<button class="textbtn" id="moreS">ほかの意味 ${all.length - 4}個</button>` : ""}`
@@ -442,9 +443,9 @@ function openSheet(el) {
     <h3>この文</h3>
     <div class="ctx">${wordsHTML(line.en).replace(new RegExp(`>${word}<`), `><b>${esc(word)}</b><`)}${line.ja ? `<br>${esc(line.ja)}` : ""}</div>
     ${exs.length ? `<h3>ほかの動画の例文</h3><ul class="ex">${exs.map(x => `<li><button class="say sm" data-say="${esc(x.l.en)}" aria-label="例文を聞く" style="float:right;margin-left:8px">${SPK}</button>${boldWord(x.l.en, r.head)}<div class="ej">${esc(x.l.ja)}</div><button class="src" data-goto="${x.v.id}" data-t="${x.l.s}">${esc(x.v.ja)} ${mmss(x.l.s)}</button></li>`).join("")}</ul>` : ""}
-    <div class="row">${r ? `<span class="saved">単語帳に入れました</span>` : ""}
+    <div class="row">
       <a class="textbtn" href="https://ejje.weblio.jp/content/${encodeURIComponent(r ? r.head : word.toLowerCase())}" target="_blank" rel="noopener">Weblio で詳しく</a>
-      <button class="primary" id="closeS" style="margin-left:auto">閉じる</button></div>`;
+      <button class="textbtn" id="closeS" style="margin-left:auto">閉じる</button></div>`;
   document.body.append(bg, sh);
   say(word);
   bg.onclick = closeSheet; $("#closeS").onclick = closeSheet;
@@ -452,9 +453,13 @@ function openSheet(el) {
   $("#closeS").focus({ preventScroll: true }); // 板が長いので、意味が見える上のほうから見せる
   if (r) {
     const id = r.head.replace(/[^a-z0-9_.~:@+-]/g, "-");
-    const old = S.words[id] || {};
-    Store.put(id, { head: r.head, mean: all.slice(0, 3).join(" / "), en: line.en, ja: line.ja || "", vid: S.video.id, t: line.s,
-      n: (old.n || 0) + 1, done: false, at: new Date().toISOString(), first: old.first || new Date().toISOString() });
+    const doc = () => ({ head: r.head, mean: all.slice(0, 3).join(" / "), en: line.en, ja: line.ja || "", vid: S.video.id, t: line.s,
+      n: (S.words[id]?.n || 0) + 1, done: false, at: new Date().toISOString(), first: S.words[id]?.first || new Date().toISOString() });
+    const btn = $("#addW");
+    const show = () => { const on = !!S.words[id]; btn.setAttribute("aria-pressed", on); btn.innerHTML = on ? `${CHECK}単語帳に入れた` : "単語帳に入れる"; };
+    if (S.words[id]) Store.put(id, doc());  // もう入っている単語は、調べた回数を増やしてまだ覚えていない扱いに戻す
+    btn.onclick = () => { if (S.words[id]) Store.del(id); else Store.put(id, doc()); show(); };
+    show();
   }
 }
 function closeSheet() {
@@ -468,7 +473,7 @@ function renderWords(main) {
   const list = Object.entries(S.words).filter(([, w]) => show === "all" || !w.done).sort((a, b) => (b[1].at || "").localeCompare(a[1].at || ""));
   const total = Object.keys(S.words).length, done = Object.values(S.words).filter(w => w.done).length;
   main.innerHTML = `<div class="pad wrap">
-    <p class="note" style="margin:12px 0 8px">調べた単語は自動でここに入ります。${total}語のうち ${done}語 覚えた。</p>
+    <p class="note" style="margin:12px 0 8px">単語の板で「単語帳に入れる」を押した単語が入ります。${total}語のうち ${done}語 覚えた。</p>
     <div class="seg" role="group" aria-label="表示">${[["todo", "まだ"], ["all", "すべて"]].map(([k, l]) => `<button data-wshow="${k}" aria-pressed="${show === k}">${l}</button>`).join("")}</div>
     ${list.length ? `<ul class="list">${list.map(([id, w]) => `<li class="wrow ${w.done ? "done" : ""}" data-id="${esc(id)}">
       <button data-open><span class="word">${esc(w.head)}</span><span class="cnt">${w.n}回</span><span class="mean">${esc(w.mean)}</span></button>
@@ -479,7 +484,7 @@ function renderWords(main) {
           ${EMBED ? `<button class="textbtn" data-jump>この場面を見る</button>` : `<a class="textbtn" href="https://www.youtube.com/watch?v=${esc(w.vid)}&t=${Math.floor(w.t)}s" target="_blank" rel="noopener">この場面を見る</a>`}
           <button class="textbtn" data-del>消す</button></div>
       </div></li>`).join("")}</ul>`
-      : `<p class="empty">${total ? "まだの単語はありません。" : "動画の字幕で単語を押すと、ここにたまります。"}</p>`}
+      : `<p class="empty">${total ? "まだの単語はありません。" : "字幕の単語を押して「単語帳に入れる」を選ぶと、ここにたまります。"}</p>`}
   </div>`;
 }
 
