@@ -40,7 +40,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .big { font-size: 34px; font-weight: 800; letter-spacing: -0.01em; margin: 16px 0 4px; }
 .note { font-size: 15px; color: var(--sub); }
-.small { font-size: 13px; color: var(--sub); }
+.small { font-size: 13px; color: var(--sub); overflow-wrap: anywhere; }
 
 /* 下の切り替え */
 .tabs { display: flex; border-top: 1px solid var(--line); background: var(--bg);
@@ -138,6 +138,14 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .seg { display: flex; background: var(--chip); border-radius: 12px; padding: 3px; }
 .seg button { flex: 1; min-height: 44px; border-radius: 10px; font-size: 15px; }
 .seg button[aria-pressed="true"] { background: var(--bg); font-weight: 700; box-shadow: 0 0 0 1px var(--line); }
+.seg.watch-seg { margin-top: 8px; }
+.seg.watch-seg button { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 2px; line-height: 1.25; font-size: 14px; min-width: 0; }
+.seg.watch-seg small { font-size: 13px; color: var(--sub); font-weight: 400; font-variant-numeric: tabular-nums; }
+.check { display: inline-block; width: 19px; height: 19px; margin-right: 5px; vertical-align: -3px; color: var(--ok); }
+.watch { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; font-size: 15px; }
+.watch span { color: var(--sub); }
+.watch span.fin { color: var(--ok); font-weight: 700; }
+.watch button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: var(--chip); font-size: 15px; }
 code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius: 6px; word-break: break-all; }
 
 @media (min-width: 900px) {
@@ -193,7 +201,7 @@ function candidates(word) {
   return [...new Set(out)];
 }
 
-const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", video: null, jpMode: "always", rate: 1, repeat: false, cur: -1 };
+const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", watch: "all", resumed: 0, video: null, jpMode: "always", rate: 1, repeat: false, cur: -1 };
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -201,6 +209,43 @@ const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2
 const shiftOf = id => +(pref("shift-" + id) || 0);
 function pref(k, v) { try { if (v === undefined) return localStorage.getItem("douga-" + k); localStorage.setItem("douga-" + k, v); } catch (e) { return null; } }
 S.jpMode = pref("jp") || "always";
+S.watch = pref("watch") || "all";
+
+// ---- 見た記録（このブラウザに動画ごとに残す）。t: 見ていた位置（秒）、b: 流した場所（10秒ごとの番号）、done: 見終わった ----
+let P = {}; try { P = JSON.parse(pref("prog") || "{}"); } catch (e) {}
+let progDirty = false, progSavedAt = 0;
+const BUCKET = 10, MIN_T = 5, DONE_RATIO = 0.9;
+const CHECK = `<svg class="check" viewBox="0 0 24 24" role="img" aria-label="見終わった"><path d="M4 12.5l5.5 5.5L20 6.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function saveProg() { if (progDirty) { pref("prog", JSON.stringify(P)); progDirty = false; } progSavedAt = Date.now(); }
+// 話の終わり＝最後の字幕の終わり。動画の長さは出どころ（TED の配信と YouTube）で10〜30秒ちがうので使わない
+const endOf = v => v.lines.at(-1)?.e || v.dur;
+// 最後の文が始まったら終わりまで来たとみなす（最後の字幕の終わりは推定で、動画より数秒長いことがある）
+const lastAt = v => v.lines.at(-1)?.s ?? v.dur;
+function watchState(v) { const r = P[v.id]; return r?.done ? "done" : r?.t >= MIN_T ? "part" : "none"; }
+function resumeAt(v) { const r = P[v.id]; return r && !r.done && r.t >= MIN_T && r.t < lastAt(v) ? Math.max(0, r.t - 2) : 0; }
+function noteProgress(v, raw, t) {
+  const r = P[v.id] ||= { t: 0, b: [] };
+  if (r.done) return;
+  const k = Math.floor(raw / BUCKET);
+  if (!r.b.includes(k)) r.b.push(k);
+  if (Math.abs(r.t - raw) >= 1) { r.t = Math.round(raw); progDirty = true; }
+  // 終わりへ飛ばしただけでは印を付けないよう、話の9割以上を流したときだけ見終わりにする
+  const need = (endOf(v) - (v.lines[0]?.s || 0)) / BUCKET * DONE_RATIO;
+  if (t >= lastAt(v) && r.b.length >= need) { P[v.id] = { done: 1 }; progDirty = true; saveProg(); renderWatch(); return; }
+  if (Date.now() - progSavedAt > 5000) saveProg();
+}
+function setDone(v, on) {
+  if (on) P[v.id] = { done: 1 }; else delete P[v.id];
+  progDirty = true; saveProg(); S.resumed = 0; renderWatch();
+}
+function renderWatch() {
+  const el = $("#watch"), v = S.video; if (!el || !v) return;
+  el.innerHTML = watchState(v) === "done"
+    ? `<span class="fin">${CHECK}見終わった</span><button data-mark="0">印を外す</button>`
+    : `${S.resumed ? `<span>${mmss(S.resumed)} から続けます</span><button data-restart>最初から</button>` : ""}<button data-mark="1">見終わった印を付ける</button>`;
+}
+addEventListener("pagehide", saveProg);
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveProg(); });
 
 // ---- 単語帳の置き場所: claude.ai では db、家の Wi-Fi では serve.py、どちらも無ければこのブラウザ ----
 const Store = {
@@ -260,15 +305,23 @@ function render() {
 function renderList(main) {
   const topics = ["すべて", ...new Set(S.videos.map(v => v.topic))];
   const maxW = Math.max(...S.videos.map(v => v.wpm), 200);
-  const vs = S.videos.filter(v => S.topic === "すべて" || v.topic === S.topic);
+  const inTopic = S.videos.filter(v => S.topic === "すべて" || v.topic === S.topic);
+  const vs = inTopic.filter(v => S.watch === "all" || watchState(v) === S.watch);
+  const count = k => k === "all" ? inTopic.length : inTopic.filter(v => watchState(v) === k).length;
+  const row = v => {
+    const st = watchState(v), pos = P[v.id]?.t || 0;
+    return `<li><button class="vrow" data-vid="${v.id}">
+      <span class="ja">${st === "done" ? CHECK : ""}${esc(v.ja)}</span><span class="en">${esc(v.title)}</span>
+      <span class="meta"><span class="tag">${esc(v.topic)}</span><span>${mmss(v.dur)}</span>
+        ${st === "part" ? `<span class="speed">途中 <i><b style="width:${Math.min(100, Math.round(pos / endOf(v) * 100))}%"></b></i>${mmss(pos)}</span>` : ""}
+        <span class="speed" title="1分あたりの語数">速さ <i><b style="width:${Math.round(v.wpm / maxW * 100)}%"></b></i>${v.wpm}語/分</span></span>
+    </button></li>`;
+  };
   main.innerHTML = `<div class="pad wrap">
     <p class="note" style="margin:12px 0 0">聞きやすい順（話す速さと長さ）。単語を押すと意味が出ます。</p>
     <div class="chips" role="group" aria-label="話題">${topics.map(t => `<button class="chip" aria-pressed="${t === S.topic}" data-topic="${esc(t)}">${esc(t)}</button>`).join("")}</div>
-    <ul class="list">${vs.map(v => `<li><button class="vrow" data-vid="${v.id}">
-      <span class="ja">${esc(v.ja)}</span><span class="en">${esc(v.title)}</span>
-      <span class="meta"><span class="tag">${esc(v.topic)}</span><span>${mmss(v.dur)}</span>
-        <span class="speed" title="1分あたりの語数">速さ <i><b style="width:${Math.round(v.wpm / maxW * 100)}%"></b></i>${v.wpm}語/分</span></span>
-    </button></li>`).join("")}</ul>
+    <div class="seg watch-seg" role="group" aria-label="見た動画の絞り込み">${[["all", "すべて"], ["none", "見ていない"], ["part", "途中"], ["done", "見終わった"]].map(([k, l]) => `<button data-watch="${k}" aria-pressed="${S.watch === k}">${l}<small>${count(k)}</small></button>`).join("")}</div>
+    ${vs.length ? `<ul class="list">${vs.map(row).join("")}</ul>` : `<p class="note" style="margin:24px 0">${{ none: "この話題の動画は、全部見始めています。", part: "途中まで見た動画はありません。", done: "見終わった動画はまだありません。" }[S.watch] || "動画がありません。"}</p>`}
     <p class="small" style="margin:16px 0 24px">字幕は TED の英語字幕と、ボランティアの日本語訳です。</p>
   </div>`;
 }
@@ -278,11 +331,15 @@ function renderVideo(main) {
   $("#top").innerHTML = `<button class="back" id="back" aria-label="一覧へ戻る"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>${esc(v.ja)}</h1>`;
   $("#back").onclick = () => { S.video = null; stopPlayer(); render(); };
   const yt = t => `https://www.youtube.com/watch?v=${v.id}&t=${Math.floor(t)}s`;
+  // 途中まで見ていたら続きから。単語帳や例文から場面へ飛んだときは、その場面を優先する
+  const at = EMBED && !S.noResume ? resumeAt(v) : 0;
+  S.noResume = false; S.resumed = at;
   main.innerHTML = `${EMBED ? `<div class="player"><div id="yt"></div></div>` : ""}
   <div class="pad wrap">
     ${EMBED ? "" : `<div class="open-yt"><a class="primary" href="${yt(0)}" target="_blank" rel="noopener">YouTube で見る</a><span class="small">時間を押すと、その場面から開きます</span></div>`}
     <p class="small" style="margin:12px 0 0">${esc(v.title)}<br>${esc(v.credit)}</p>
     ${EMBED ? `<div class="shift small"><span>字幕のずれ</span><button data-shift="-0.5">早める</button><b id="shiftv">${shiftLabel(shiftOf(v.id))}</b><button data-shift="0.5">遅らせる</button></div>` : ""}
+    <div class="watch" id="watch"></div>
     <ol class="lines" id="lines">${v.lines.map((l, i) => `<li class="ln" data-i="${i}">
       ${EMBED ? `<button class="t" data-seek="${l.s}">${mmss(l.s)}</button>` : `<a class="t" href="${yt(l.s)}" target="_blank" rel="noopener">${mmss(l.s)}</a>`}
       <div class="body"><div class="en">${wordsHTML(l.en)}</div>
@@ -290,7 +347,8 @@ function renderVideo(main) {
       </div></li>`).join("")}</ol>
   </div>`;
   main.scrollTop = 0;
-  if (EMBED) { renderCtrl(); startPlayer(v); }
+  renderWatch();
+  if (EMBED) { renderCtrl(); startPlayer(v, at); }
 }
 function shiftLabel(n) { return n === 0 ? "ぴったり" : (n > 0 ? "+" : "") + n.toFixed(1) + "秒"; }
 function wordsHTML(text) {
@@ -460,10 +518,11 @@ let hlsLib = null;
 function loadHls() {
   return hlsLib ||= new Promise((ok, ng) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"; sc.onload = ok; sc.onerror = ng; document.head.append(sc); });
 }
-async function videoPlayer(v) {
+async function videoPlayer(v, at) {
   const el = document.createElement("video");
   el.controls = true; el.playsInline = true; el.preload = "metadata";
   $("#yt").replaceChildren(el);
+  if (at) el.addEventListener("loadedmetadata", () => { el.currentTime = at; }, { once: true });
   let hls = null;
   // hls.js を先に使う（Edge は「流せる」と答えるのに流せなかった）。使えないとき（古い iPhone など）はそのまま流す
   await loadHls().catch(() => {});
@@ -478,25 +537,26 @@ async function videoPlayer(v) {
     destroy: () => { hls?.destroy(); el.remove(); },
   };
 }
-async function startPlayer(v) {
+async function startPlayer(v, at = 0) {
   if (v.hls) {
-    const p = await videoPlayer(v);
+    const p = await videoPlayer(v, at);
     if (S.video !== v) return p.destroy();
     player = p; S.cur = -1; timer = setInterval(tick, 250); renderCtrl();
     return;
   }
   await loadYT();
   if (S.video !== v) return;
-  player = new YT.Player("yt", { videoId: v.id, playerVars: { playsinline: 1, rel: 0, cc_load_policy: 0, origin: location.origin },
+  player = new YT.Player("yt", { videoId: v.id, playerVars: { playsinline: 1, rel: 0, cc_load_policy: 0, origin: location.origin, start: Math.floor(at) },
     events: { onReady: () => player.setPlaybackRate(S.rate), onStateChange: renderCtrl } });
   S.cur = -1;
   timer = setInterval(tick, 250);
 }
-function stopPlayer() { clearInterval(timer); timer = null; try { player?.destroy(); } catch (e) {} player = null; }
+function stopPlayer() { saveProg(); clearInterval(timer); timer = null; try { player?.destroy(); } catch (e) {} player = null; }
 let userScrollAt = 0;
 function tick() {
   if (!player?.getCurrentTime) return;
-  const sh = shiftOf(S.video.id), t = player.getCurrentTime() - sh, L = S.video.lines;
+  const raw = player.getCurrentTime(), sh = shiftOf(S.video.id), t = raw - sh, L = S.video.lines;
+  if (player.getPlayerState?.() === 1) noteProgress(S.video, raw, t);
   if (S.repeat && S.cur >= 0 && t >= L[S.cur].e - 0.05) { player.seekTo(L[S.cur].s + sh, true); return; }
   let i = L.findIndex((l, k) => t >= l.s && (k === L.length - 1 || t < L[k + 1].s));
   if (i === S.cur || i < 0) return;
@@ -504,7 +564,8 @@ function tick() {
   document.querySelectorAll(".ln.now").forEach(e => e.classList.remove("now"));
   const li = document.querySelector(`.ln[data-i="${i}"]`); if (!li) return;
   li.classList.add("now");
-  if (Date.now() - userScrollAt > 4000) {
+  // 続きから開いた直後は、「最初から」が隠れないよう、再生するまで字幕を動かさない
+  if (Date.now() - userScrollAt > 4000 && (!S.resumed || player.getPlayerState?.() === 1)) {
     const main = $("#main"), pl = $(".player");
     const top = main.scrollTop + li.getBoundingClientRect().top - main.getBoundingClientRect().top;
     main.scrollTo({ top: top - (pl ? pl.offsetHeight : 0) - 8, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
@@ -544,13 +605,16 @@ document.addEventListener("click", e => {
   const t = e.target;
   const tab = t.closest(".tabs button"); if (tab) return setTab(tab.dataset.tab);
   const chip = t.closest("[data-topic]"); if (chip) { S.topic = chip.dataset.topic; return render(); }
+  const wf = t.closest("[data-watch]"); if (wf) { S.watch = wf.dataset.watch; pref("watch", S.watch); return render(); }
+  const mk = t.closest("[data-mark]"); if (mk) return setDone(S.video, mk.dataset.mark === "1");
+  if (t.closest("[data-restart]")) { S.resumed = 0; S.cur = -1; userScrollAt = 0; player?.seekTo(0, true); player?.playVideo(); $("#main").scrollTop = 0; return renderWatch(); }
   const vrow = t.closest("[data-vid]"); if (vrow) { S.video = S.videos.find(v => v.id === vrow.dataset.vid); return render(); }
   const w = t.closest(".lines .w"); if (w) return openSheet(w);
   const sy = t.closest("[data-say]"); if (sy) return say(sy.dataset.say);
   const go = t.closest("[data-goto]");
   if (go) {
     const v = S.videos.find(x => x.id === go.dataset.goto), at = +go.dataset.t; if (!v) return;
-    closeSheet(); stopPlayer(); S.tab = "videos"; S.video = v; render();
+    closeSheet(); stopPlayer(); S.tab = "videos"; S.video = v; S.noResume = true; render();
     setTimeout(() => player?.seekTo?.(at + shiftOf(v.id), true), 1500);
     return;
   }
@@ -577,7 +641,7 @@ document.addEventListener("click", e => {
     if (t.closest("[data-del]")) { Store.del(id); return render(); }
     if (t.closest("[data-jump]")) {
       const v = S.videos.find(x => x.id === w0.vid); if (!v) return;
-      S.tab = "videos"; S.video = v; render();
+      S.tab = "videos"; S.video = v; S.noResume = true; render();
       setTimeout(() => player?.seekTo?.(w0.t + shiftOf(v.id), true), 1500);
     }
   }
