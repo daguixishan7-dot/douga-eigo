@@ -148,6 +148,43 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .watch span.fin { color: var(--ok); font-weight: 700; }
 .watch button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: var(--chip); font-size: 15px; }
 code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius: 6px; word-break: break-all; }
+.set .ev { font-size: 15px; margin: 0; }
+.set .ev a { color: var(--sub); }
+
+/* 聞いた量（一覧の上）。目標に届いた日の棒だけ緑 */
+.meter { padding: 12px 0 8px; border-bottom: 1px solid var(--line); }
+.meter p { margin: 0; font-size: 15px; }
+.meter svg { width: 100%; height: auto; display: block; margin: 8px 0 2px; }
+.meter text { fill: var(--sub); font: 12px var(--font); }
+.meter .tr { fill: var(--chip); }
+.meter .bar { fill: var(--fg); }
+.meter .bar.ok { fill: var(--ok); }
+.meter .goal { stroke: var(--sub); stroke-width: 1; stroke-dasharray: 3 3; }
+.meter .due { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+
+/* 復習 */
+.revbox { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.revbox p { margin: 0; }
+.card { padding-block: 8px 32px; }
+.card .rhead { display: flex; align-items: center; justify-content: space-between; }
+.card .ctxen { font-size: 19px; line-height: 1.6; margin: 16px 0 8px; }
+.card .word2 { font-size: 34px; font-weight: 800; margin: 8px 0; display: flex; align-items: center; gap: 12px; }
+.card .ans { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+.card .ans p { margin: 0 0 6px; }
+.grade { display: flex; gap: 12px; margin-top: 20px; }
+.grade button { flex: 1; min-height: 52px; border-radius: 999px; font-weight: 700; }
+.secondary { background: var(--chip); }
+
+/* 話す練習 */
+.talk { border-top: 1px solid var(--line); padding: 16px 0 40px; }
+.talk h2 { font-size: 17px; margin: 0 0 4px; }
+.talk .opts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.talk .opts button { min-height: 48px; padding: 0 18px; border-radius: 999px; background: var(--chip); font-size: 15px; font-weight: 700; }
+.talk .clock { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 8px 0; }
+.talk .ask { font-size: 15px; margin: 0 0 4px; }
+.talk .hint { font-size: 15px; color: var(--sub); margin: 0 0 12px; }
+.talk audio { width: 100%; margin: 8px 0; }
+.talk .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
 @media (min-width: 900px) {
   .app { flex-direction: row-reverse; }
@@ -202,7 +239,7 @@ function candidates(word) {
   return [...new Set(out)];
 }
 
-const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", watch: "all", resumed: 0, video: null, jpMode: "always", rate: 1, repeat: false, cur: -1 };
+const S = { videos: [], dict: {}, words: {}, tab: "videos", topic: "すべて", watch: "all", resumed: 0, video: null, jpMode: "always", enMode: "always", rate: 1, repeat: false, cur: -1, review: null };
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -210,14 +247,28 @@ const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2
 const shiftOf = id => +(pref("shift-" + id) || 0);
 function pref(k, v) { try { if (v === undefined) return localStorage.getItem("douga-" + k); localStorage.setItem("douga-" + k, v); } catch (e) { return null; } }
 S.jpMode = pref("jp") || "always";
+S.enMode = pref("en") || "always";
 S.watch = pref("watch") || "all";
+
+// ---- 日付（このブラウザの時計で YYYY-MM-DD） ----
+const dayStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => dayStr(new Date());
+const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return dayStr(d); };
+const md = s => `${+s.slice(5, 7)}/${+s.slice(8, 10)}`;
+
+// ---- 聞いた量（このブラウザに日ごとに残す）。s: 流した秒、w: 聞いた語数（流れた字幕の語数）、sp: 話す練習の回数 ----
+let LG = {}; try { LG = JSON.parse(pref("listen") || "{}"); } catch (e) {}
+let lgDirty = false, lastTickAt = 0;
+const goalMin = () => +(pref("goal") || 30);   // 1日の目標（分）。研究で決まった数ではない。設定で変えられる
+function addListen(k, n) { const r = LG[today()] ||= { s: 0, w: 0, sp: 0 }; r[k] = (r[k] || 0) + n; lgDirty = true; }
+function saveListen() { if (lgDirty) { pref("listen", JSON.stringify(LG)); lgDirty = false; } }
 
 // ---- 見た記録（このブラウザに動画ごとに残す）。t: 見ていた位置（秒）、b: 流した場所（10秒ごとの番号）、done: 見終わった ----
 let P = {}; try { P = JSON.parse(pref("prog") || "{}"); } catch (e) {}
 let progDirty = false, progSavedAt = 0;
 const BUCKET = 10, MIN_T = 5, DONE_RATIO = 0.9;
 const CHECK = `<svg class="check" viewBox="0 0 24 24" role="img" aria-label="見終わった"><path d="M4 12.5l5.5 5.5L20 6.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-function saveProg() { if (progDirty) { pref("prog", JSON.stringify(P)); progDirty = false; } progSavedAt = Date.now(); }
+function saveProg() { if (progDirty) { pref("prog", JSON.stringify(P)); progDirty = false; } saveListen(); progSavedAt = Date.now(); }
 // 話の終わり＝最後の字幕の終わり。動画の長さは出どころ（TED の配信と YouTube）で10〜30秒ちがうので使わない
 const endOf = v => v.lines.at(-1)?.e || v.dur;
 // 最後の文が始まったら終わりまで来たとみなす（最後の字幕の終わりは推定で、動画より数秒長いことがある）
@@ -262,7 +313,7 @@ const Store = {
         this.kind = "db"; this.db = db;
         db.collection("words").onSnapshot(snap => {
           S.words = {}; snap.docs.forEach(d => { S.words[d.id] = d.data(); });
-          if (S.tab === "words" && !S.video) render();
+          if (!S.video && (S.tab === "words" || (S.tab === "videos" && dueIds().length !== S.dueShown))) render();
         }, () => {});
       }
     }
@@ -287,7 +338,7 @@ const Store = {
 
 // ---- 画面 ----
 function setTab(tab) {
-  S.tab = tab; S.video = null; stopPlayer();
+  S.tab = tab; S.video = null; S.review = null; stopPlayer();
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
   render();
 }
@@ -319,12 +370,37 @@ function renderList(main) {
     </button></li>`;
   };
   main.innerHTML = `<div class="pad wrap">
+    ${meterHTML()}
     <p class="note" style="margin:12px 0 0">聞きやすい順（話す速さと長さ）。単語を押すと意味が出ます。</p>
     <div class="chips" role="group" aria-label="話題">${topics.map(t => `<button class="chip" aria-pressed="${t === S.topic}" data-topic="${esc(t)}">${esc(t)}</button>`).join("")}</div>
     <div class="seg watch-seg" role="group" aria-label="見た動画の絞り込み">${[["all", "すべて"], ["none", "見ていない"], ["part", "途中"], ["done", "見終わった"]].map(([k, l]) => `<button data-watch="${k}" aria-pressed="${S.watch === k}">${l}<small>${count(k)}</small></button>`).join("")}</div>
     ${vs.length ? `<ul class="list">${vs.map(row).join("")}</ul>` : `<p class="note" style="margin:24px 0">${{ none: "この話題の動画は、全部見始めています。", part: "途中まで見た動画はありません。", done: "見終わった動画はまだありません。" }[S.watch] || "動画がありません。"}</p>`}
     <p class="small" style="margin:16px 0 24px">字幕は TED の英語字幕と、ボランティアの日本語訳です。</p>
   </div>`;
+}
+
+// ---- 聞いた量の帯（一覧の上）。動画を流した時間だけ数える（claude.ai 版はページの中で流せないので出さない） ----
+const fmtN = n => n >= 10000 ? `${(n / 10000).toFixed(1)}万` : Math.round(n).toLocaleString();
+const hm = sec => { const m = Math.round(sec / 60); return m >= 60 ? `${Math.floor(m / 60)}時間${m % 60}分` : `${m}分`; };
+function meterHTML() {
+  const due = S.dueShown = dueIds().length;
+  const dueRow = due ? `<div class="due"><span>今日の単語の復習 <b>${due}語</b></span><button class="textbtn" data-tab-go="words">復習する</button></div>` : "";
+  if (!EMBED) return due ? `<div class="meter">${dueRow}</div>` : "";
+  const days = [...Array(7)].map((_, k) => addDays(k - 6)), goal = goalMin();
+  const mins = days.map(d => (LG[d]?.s || 0) / 60), week = mins.reduce((a, m) => a + m, 0);
+  const all = Object.values(LG), totS = all.reduce((a, r) => a + (r.s || 0), 0), totW = all.reduce((a, r) => a + (r.w || 0), 0);
+  const W = 340, H = 90, top = 6, base = 68, bw = 32, gap = (W - 7 * bw) / 6, max = Math.max(goal * 1.25, ...mins);
+  const y = m => base - (base - top) * Math.min(m, max) / max;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="この7日に聞いた分数。点線は1日の目標${goal}分">`;
+  days.forEach((d, k) => {
+    const x = k * (bw + gap);
+    s += `<rect class="tr" x="${x}" y="${top}" width="${bw}" height="${base - top}" rx="4"/>`;
+    if (mins[k] >= 0.5) s += `<rect class="bar${mins[k] >= goal ? " ok" : ""}" x="${x}" y="${y(mins[k])}" width="${bw}" height="${base - y(mins[k])}" rx="4"/>`;
+    s += `<text x="${x + bw / 2}" y="${H - 4}" text-anchor="middle">${k === 6 ? "今日" : "日月火水木金土"[new Date(d + "T00:00").getDay()]}</text>`;
+  });
+  s += `<line class="goal" x1="0" x2="${W}" y1="${y(goal)}" y2="${y(goal)}"/></svg>`;
+  return `<div class="meter"><p>今日 <b>${Math.round(mins[6])}分</b> 聞いた（目標 ${goal}分）・この7日 ${Math.round(week)}分</p>${s}
+    <p class="small">これまで ${hm(totS)}・字幕でおよそ${fmtN(totW)}語を聞きました（このブラウザの記録）。</p>${dueRow}</div>`;
 }
 
 function renderVideo(main) {
@@ -343,12 +419,15 @@ function renderVideo(main) {
     <div class="watch" id="watch"></div>
     <ol class="lines" id="lines">${v.lines.map((l, i) => `<li class="ln" data-i="${i}">
       ${EMBED ? `<button class="t" data-seek="${l.s}">${mmss(l.s)}</button>` : `<a class="t" href="${yt(l.s)}" target="_blank" rel="noopener">${mmss(l.s)}</a>`}
-      <div class="body"><div class="en">${wordsHTML(l.en)}</div>
+      <div class="body">${S.enMode === "tap" ? `<div class="reveal" hidden>` : ""}<div class="en">${wordsHTML(l.en)}</div>
       ${S.jpMode === "never" ? "" : `<div class="jp" ${S.jpMode === "tap" ? "hidden" : ""}>${esc(l.ja || "（この文の訳はありません）")}</div>${S.jpMode === "tap" ? `<button class="jp-btn" data-showjp>訳を見る</button>` : ""}`}
+      ${S.enMode === "tap" ? `</div><button class="jp-btn" data-showen>英語を見る</button>` : ""}
       </div></li>`).join("")}</ol>
+    <section class="talk" id="talk"></section>
   </div>`;
   main.scrollTop = 0;
   renderWatch();
+  renderTalk();
   if (EMBED) { renderCtrl(); startPlayer(v, at); }
 }
 function shiftLabel(n) { return n === 0 ? "ぴったり" : (n > 0 ? "+" : "") + n.toFixed(1) + "秒"; }
@@ -453,8 +532,9 @@ function openSheet(el) {
   $("#closeS").focus({ preventScroll: true }); // 板が長いので、意味が見える上のほうから見せる
   if (r) {
     const id = r.head.replace(/[^a-z0-9_.~:@+-]/g, "-");
+    // 初めての単語も、もう一度調べた（＝忘れていた）単語も、復習は明日から
     const doc = () => ({ head: r.head, mean: all.slice(0, 3).join(" / "), en: line.en, ja: line.ja || "", vid: S.video.id, t: line.s,
-      n: (S.words[id]?.n || 0) + 1, done: false, at: new Date().toISOString(), first: S.words[id]?.first || new Date().toISOString() });
+      n: (S.words[id]?.n || 0) + 1, done: false, box: 0, due: addDays(1), at: new Date().toISOString(), first: S.words[id]?.first || new Date().toISOString() });
     const btn = $("#addW");
     const show = () => { const on = !!S.words[id]; btn.setAttribute("aria-pressed", on); btn.innerHTML = on ? `${CHECK}単語帳に入れた` : "単語帳に入れる"; };
     if (S.words[id]) Store.put(id, doc());  // もう入っている単語は、調べた回数を増やしてまだ覚えていない扱いに戻す
@@ -467,12 +547,55 @@ function closeSheet() {
   document.querySelectorAll(".w.hit").forEach(w => w.classList.remove("hit"));
 }
 
+// ---- 復習（日をあけて思い出す）。思い出せたら次は 3→7→14→30→60日後、だめなら明日。60日後にも思い出せたら「覚えた」 ----
+const GAPS = [1, 3, 7, 14, 30, 60];
+const dueOf = w => w.due || today();   // 復習の日がない（前からある）単語は、今日が復習の日
+function dueIds() {
+  const t = today();
+  return Object.entries(S.words).filter(([, w]) => !w.done && dueOf(w) <= t).sort((a, b) => dueOf(a[1]).localeCompare(dueOf(b[1]))).map(([id]) => id);
+}
+function nextDue() {
+  const t = today(), fut = Object.values(S.words).filter(w => !w.done && dueOf(w) > t).map(dueOf).sort();
+  return fut.length ? { day: fut[0], n: fut.filter(d => d === fut[0]).length } : null;
+}
+function grade(id, ok) {
+  const w = S.words[id]; if (!w) return;
+  const box = ok ? (w.box || 0) + 1 : 0;
+  const doc = { ...w, box, due: addDays(ok ? GAPS[Math.min(box, GAPS.length - 1)] : 1), ok: (w.ok || 0) + (ok ? 1 : 0), ng: (w.ng || 0) + (ok ? 0 : 1) };
+  if (ok && box >= GAPS.length) doc.done = true;
+  Store.put(id, doc);
+}
+function renderReview(main) {
+  const R = S.review, id = R.q[R.i], w = id && S.words[id];
+  if (!w) {
+    const nx = nextDue();
+    main.innerHTML = `<div class="pad wrap card"><p class="big">おわり</p>
+      <p class="note">${R.base}語を復習して、${R.ok}語を思い出せました。${nx ? `次の復習は ${md(nx.day)} に ${nx.n}語です。` : ""}</p>
+      <div class="grade"><button class="primary" data-revend>単語帳へ</button></div></div>`;
+    return;
+  }
+  const scene = EMBED ? `<button class="textbtn" data-goto="${esc(w.vid)}" data-t="${w.t}">この場面を見る</button>`
+    : `<a class="textbtn" href="https://www.youtube.com/watch?v=${esc(w.vid)}&t=${Math.floor(w.t)}s" target="_blank" rel="noopener">この場面を見る</a>`;
+  main.innerHTML = `<div class="pad wrap card">
+    <div class="rhead"><span class="note">${Math.min(R.i + 1, R.base)} / ${R.base}${R.i >= R.base ? "（もう一度）" : ""}</span><button class="textbtn" data-revend>やめる</button></div>
+    <p class="ctxen">${boldWord(w.en, w.head)} <button class="say sm" data-say="${esc(w.en)}" aria-label="文を聞く">${SPK}</button></p>
+    <p class="word2">${esc(w.head)}<button class="say" data-say="${esc(w.head)}" aria-label="発音を聞く">${SPK}</button></p>
+    ${R.show ? `<div class="ans"><p>${esc(w.mean)}</p><p class="note">${esc(w.ja)}</p>${scene}</div>
+      <div class="grade"><button class="secondary" data-grade="0">だめだった</button><button class="primary" data-grade="1">思い出せた</button></div>`
+    : `<p class="note">文の中での意味を、見る前に思い出してください。</p><div class="grade"><button class="primary" data-reveal>意味を見る</button></div>`}
+  </div>`;
+}
+
 // ---- 単語帳 ----
 function renderWords(main) {
+  if (S.review) return renderReview(main);
   const show = pref("wshow") || "todo";
   const list = Object.entries(S.words).filter(([, w]) => show === "all" || !w.done).sort((a, b) => (b[1].at || "").localeCompare(a[1].at || ""));
   const total = Object.keys(S.words).length, done = Object.values(S.words).filter(w => w.done).length;
+  const due = dueIds(), nx = nextDue();
   main.innerHTML = `<div class="pad wrap">
+    ${total ? `<div class="revbox">${due.length ? `<p>今日の復習 <b>${due.length}語</b></p><button class="primary" data-rev>復習する</button>`
+      : `<p class="note">今日の復習はおわりです。${nx ? `次は ${md(nx.day)} に ${nx.n}語。` : ""}</p>`}</div>` : ""}
     <p class="note" style="margin:12px 0 8px">単語の板で「単語帳に入れる」を押した単語が入ります。${total}語のうち ${done}語 覚えた。</p>
     <div class="seg" role="group" aria-label="表示">${[["todo", "まだ"], ["all", "すべて"]].map(([k, l]) => `<button data-wshow="${k}" aria-pressed="${show === k}">${l}</button>`).join("")}</div>
     ${list.length ? `<ul class="list">${list.map(([id, w]) => `<li class="wrow ${w.done ? "done" : ""}" data-id="${esc(id)}">
@@ -495,6 +618,18 @@ function renderSettings(main) {
     <div class="set"><h3>日本語訳</h3>
       <div class="seg" role="group" aria-label="日本語訳の出し方">${[["always", "いつも出す"], ["tap", "押したら出す"], ["never", "出さない"]].map(([k, l]) => `<button data-jp="${k}" aria-pressed="${S.jpMode === k}">${l}</button>`).join("")}</div>
       <p class="small">英語だけで聞き取れるか試すときは「押したら出す」が便利です。</p></div>
+    <div class="set"><h3>英語字幕</h3>
+      <div class="seg" role="group" aria-label="英語字幕の出し方">${[["always", "いつも出す"], ["tap", "押したら出す"]].map(([k, l]) => `<button data-en="${k}" aria-pressed="${S.enMode === k}">${l}</button>`).join("")}</div>
+      <p class="small">1回目は「押したら出す」で耳だけで聞き、2回目に字幕で確かめる使い方がおすすめです。字幕があると、耳で聞き取れたのか字幕を読んで分かったのかが区別しにくいためです。</p></div>
+    ${EMBED ? `<div class="set"><h3>1日に聞く目標</h3>
+      <div class="seg" role="group" aria-label="1日の目標">${[15, 30, 45, 60].map(m => `<button data-goal="${m}" aria-pressed="${goalMin() === m}">${m}分</button>`).join("")}</div>
+      <p class="small">一覧の上の棒グラフの点線になります。研究で決まった数ではありません。</p></div>` : ""}
+    <div class="set"><h3>英検1級に向けた聞き方</h3>
+      <p class="ev">・英語字幕つきの動画は、リスニングの理解と単語の両方に大きな効果があった（リスニング15件・単語10件の研究のまとめ）— <a href="https://doi.org/10.1016/j.system.2013.07.013" target="_blank" rel="noopener">Montero Perez ほか (2013)</a></p>
+      <p class="ev">・ただし、字幕でよく分かったのが「聞く力」のおかげか「字幕を読んだ」おかげかは、はっきりしていない — <a href="https://www.cambridge.org/core/journals/language-teaching/article/how-do-second-language-learners-go-about-their-listening-when-they-view-captioned-videos-replication-studies-of-taylor-2005-winke-et-al-2013-and-rodgers-and-webb-2017/272FC1BF5977996A0806EB2FE3BD67F8" target="_blank" rel="noopener">Language Teaching の追試の論文</a></p>
+      <p class="ev">・映画は1分に約83語で、読むときの半分ほどしか言葉が入らない。聞くだけでなく読む量も要る — <a href="https://nflrc.hawaii.edu/rfl/item/303" target="_blank" rel="noopener">Nation (2014)</a></p>
+      <p class="ev">・単語は、見ずに思い出す練習をすると残りやすい。時間をおいたテストで、単語カードは73%、単語の一覧を見て覚えるのは48%だった — <a href="https://takumiuchihara.weebly.com/uploads/1/2/3/7/123756989/webb_yanagisawa___uchihara__2020__mlj_intentiona_vocab_learning.pdf" target="_blank" rel="noopener">Webb ほか (2020)</a></p>
+      <p class="ev">・英検1級の面接は、5つの話題から1つ選び、考える1分・話す2分（メモなし）。動画の下の「話す練習」で同じ時間で練習できます — <a href="https://www.eiken.or.jp/eiken/exam/grade_1/solutions.html" target="_blank" rel="noopener">英検 1級の試験内容</a></p></div>
     <div class="set"><h3>いまの開き方</h3>
       <p class="note">${LOCAL ? "家の Wi-Fi（動画が一緒に動きます）" : EMBED ? "公開ページ（動画が一緒に動きます）" : "claude.ai（ページの中では動画を再生できないので、時間を押すと YouTube が開きます）"}</p></div>
     <div class="set"><h3>単語帳の置き場所</h3><p class="note">${where}</p>
@@ -507,6 +642,80 @@ function renderSettings(main) {
       <p class="small">字幕: TED の英語字幕と、TED Translators の日本語訳（訳した人の名前は動画ごとに表示）。TED Talks は <a href="https://www.ted.com/about/our-organization/our-policies-terms/ted-talks-usage-policy" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a> で公開されています。
       辞書: <a href="https://github.com/kujirahand/EJDict" target="_blank" rel="noopener">EJDict</a>（くじらはんど、CC0）。英語の勉強のための個人のページで、広告や収入はありません。</p></div>
   </div>`;
+}
+
+// ---- 話す練習（英検1級の面接と同じく、考える1分のあとに話す）。録音はこのページの中だけに置き、どこにも送らない ----
+const TALKS = {
+  sum: { label: "1分で要約を話す", think: 60, talk: 60,
+    ask: "この話の言いたいことを1文で言い、それを支える点を2つ、英語で話す。",
+    hint: "The speaker's main point is that … First, … Second, … So …" },
+  op: { label: "2分で意見を話す", think: 60, talk: 120,
+    ask: "話し手の考えに賛成か反対かを決め、理由を2つ挙げて英語で話す（英検1級のスピーチと同じ2分）。",
+    hint: "I agree / disagree with the speaker that … I have two reasons. First, … Second, … For these reasons, …" },
+};
+const T = { kind: null, phase: null, end: 0, timer: null, stream: null, rec: null, chunks: [], url: null, mic: false };
+function renderTalk() {
+  const el = $("#talk"); if (!el) return;
+  const k = TALKS[T.kind], left = Math.max(0, Math.ceil((T.end - Date.now()) / 1000));
+  if (!T.phase) {
+    el.innerHTML = `<h2>見終わったら、話す練習</h2><p class="note">英検1級の面接は、考える1分（メモなし）のあとに2分のスピーチです。</p>
+      <div class="opts">${Object.entries(TALKS).map(([key, x]) => `<button data-talk="${key}">${x.label}</button>`).join("")}</div>`;
+  } else if (T.phase === "think" || T.phase === "talk") {
+    el.innerHTML = `<h2>${T.phase === "think" ? "考える時間" : T.mic ? "話す（録音中）" : "話す（録音なし）"}</h2>
+      <p class="clock" id="talkClock">${mmss(left)}</p><p class="ask">${esc(k.ask)}</p><p class="hint">${esc(k.hint)}</p>
+      <div class="row">${T.phase === "think" ? `<button class="primary" data-talknext>話しはじめる</button>` : `<button class="primary" data-talknext>終わる</button>`}
+      <button class="textbtn" data-talkstop>やめる</button></div>`;
+  } else {
+    el.innerHTML = `<h2>聞き返す</h2>
+      ${T.url ? `<audio controls src="${T.url}"></audio><p class="small">録音はこのページを閉じると消えます（どこにも送っていません）。言いよどんだ所・日本語が浮かんだ所をもう一度言い直してみてください。</p>`
+        : `<p class="note">${T.mic === false ? "マイクが使えなかったので、録音はありません。" : "録音がありません。"}</p>`}
+      <div class="row"><button class="primary" data-talk="${T.kind}">もう一度</button><button class="textbtn" data-talkstop>閉じる</button></div>`;
+  }
+}
+function talkClock() {
+  const left = Math.max(0, Math.ceil((T.end - Date.now()) / 1000)), c = $("#talkClock");
+  if (c) c.textContent = mmss(left);
+  if (left <= 0) talkNext();
+}
+async function talkStart(kind) {
+  talkReset();
+  if (player?.pauseVideo) player.pauseVideo();
+  T.kind = kind; T.phase = "think"; T.end = Date.now() + TALKS[kind].think * 1000;
+  T.timer = setInterval(talkClock, 250); renderTalk();
+  $("#talk")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  // マイクは押したときに頼んでおき、話しはじめで録音を始める
+  try { T.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); T.mic = true; } catch (e) { T.mic = false; }
+  if (T.phase === "think") renderTalk();
+}
+function talkNext() {
+  if (T.phase === "think") {
+    T.phase = "talk"; T.end = Date.now() + TALKS[T.kind].talk * 1000;
+    if (T.stream && window.MediaRecorder) {
+      try {
+        T.rec = new MediaRecorder(T.stream); T.chunks = [];
+        T.rec.ondataavailable = e => { if (e.data.size) T.chunks.push(e.data); };
+        T.rec.onstop = () => {
+          if (T.chunks.length) T.url = URL.createObjectURL(new Blob(T.chunks, { type: T.rec.mimeType || "audio/webm" }));
+          T.stream?.getTracks().forEach(tr => tr.stop()); T.stream = null;
+          renderTalk();
+        };
+        T.rec.start();
+      } catch (e) { T.rec = null; T.mic = false; }
+    }
+    renderTalk();
+  } else if (T.phase === "talk") {
+    clearInterval(T.timer); T.timer = null; T.phase = "done";
+    addListen("sp", 1); saveListen();
+    if (T.rec && T.rec.state !== "inactive") T.rec.stop();   // 録音の後片づけは onstop で
+    else { T.stream?.getTracks().forEach(tr => tr.stop()); T.stream = null; renderTalk(); }
+  }
+}
+function talkReset() {
+  clearInterval(T.timer); T.timer = null;
+  try { if (T.rec && T.rec.state !== "inactive") { T.rec.onstop = null; T.rec.stop(); } } catch (e) {}
+  T.stream?.getTracks().forEach(tr => tr.stop());
+  if (T.url) URL.revokeObjectURL(T.url);
+  Object.assign(T, { kind: null, phase: null, end: 0, stream: null, rec: null, chunks: [], url: null, mic: false });
 }
 
 // ---- 再生（家の Wi-Fi のときだけ） ----
@@ -556,16 +765,23 @@ async function startPlayer(v, at = 0) {
   S.cur = -1;
   timer = setInterval(tick, 250);
 }
-function stopPlayer() { saveProg(); clearInterval(timer); timer = null; try { player?.destroy(); } catch (e) {} player = null; }
+function stopPlayer() { saveProg(); talkReset(); clearInterval(timer); timer = null; lastTickAt = 0; try { player?.destroy(); } catch (e) {} player = null; }
 let userScrollAt = 0;
 function tick() {
   if (!player?.getCurrentTime) return;
   const raw = player.getCurrentTime(), sh = shiftOf(S.video.id), t = raw - sh, L = S.video.lines;
-  if (player.getPlayerState?.() === 1) noteProgress(S.video, raw, t);
+  const playing = player.getPlayerState?.() === 1, now = Date.now();
+  if (playing) {
+    noteProgress(S.video, raw, t);
+    if (lastTickAt && now - lastTickAt < 2000) addListen("s", (now - lastTickAt) / 1000);  // 止めている間は数えない
+  }
+  lastTickAt = playing ? now : 0;
+  if (lgDirty && now - progSavedAt > 5000) saveProg();
   if (S.repeat && S.cur >= 0 && t >= L[S.cur].e - 0.05) { player.seekTo(L[S.cur].s + sh, true); return; }
   let i = L.findIndex((l, k) => t >= l.s && (k === L.length - 1 || t < L[k + 1].s));
   if (i === S.cur || i < 0) return;
   S.cur = i;
+  if (playing) addListen("w", (L[i].en.match(WRE) || []).length);
   document.querySelectorAll(".ln.now").forEach(e => e.classList.remove("now"));
   const li = document.querySelector(`.ln[data-i="${i}"]`); if (!li) return;
   li.classList.add("now");
@@ -626,6 +842,24 @@ document.addEventListener("click", e => {
   const seek = t.closest("[data-seek]"); if (seek) { S.cur = -1; userScrollAt = 0; player?.seekTo(+seek.dataset.seek + shiftOf(S.video.id), true); player?.playVideo(); return; }
   const sb = t.closest("[data-shift]"); if (sb) { const id = S.video.id, n = Math.round((shiftOf(id) + +sb.dataset.shift) * 2) / 2; pref("shift-" + id, n); S.cur = -1; $("#shiftv").textContent = shiftLabel(n); return; }
   const sj = t.closest("[data-showjp]"); if (sj) { sj.previousElementSibling.hidden = false; sj.remove(); return; }
+  const se = t.closest("[data-showen]"); if (se) { se.previousElementSibling.hidden = false; se.remove(); return; }
+  const tg = t.closest("[data-tab-go]"); if (tg) return setTab(tg.dataset.tabGo);
+  const tk = t.closest("[data-talk]"); if (tk) return talkStart(tk.dataset.talk);
+  if (t.closest("[data-talknext]")) return talkNext();
+  if (t.closest("[data-talkstop]")) { talkReset(); return renderTalk(); }
+  if (t.closest("[data-rev]")) { const q = dueIds(); S.review = { q, base: q.length, i: 0, show: false, ok: 0 }; return render(); }
+  if (t.closest("[data-revend]")) { S.review = null; return render(); }
+  if (t.closest("[data-reveal]")) { S.review.show = true; return render(); }
+  const gr = t.closest("[data-grade]");
+  if (gr && S.review) {
+    const R = S.review, id = R.q[R.i], ok = gr.dataset.grade === "1";
+    // 2回目（だめだった単語のやり直し）は日程を変えない。だめだった単語は、最後にもう一度出す
+    if (R.i < R.base) { grade(id, ok); if (ok) R.ok++; else R.q.push(id); }
+    R.i++; R.show = false;
+    return render();
+  }
+  const en = t.closest("[data-en]"); if (en) { S.enMode = en.dataset.en; pref("en", S.enMode); return render(); }
+  const gl = t.closest("[data-goal]"); if (gl) { pref("goal", gl.dataset.goal); return render(); }
   const c = t.closest("[data-c]");
   if (c) {
     const k = c.dataset.c;
@@ -692,7 +926,7 @@ async function unlock(given) {
   }
   render();
   await Store.init();
-  if (S.tab !== "videos" || S.video) render();
+  if (S.tab !== "videos" || S.video || dueIds().length !== S.dueShown) render();
 })();
 </script>
 </body></html>
