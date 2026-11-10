@@ -184,7 +184,20 @@ code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius
 .talk .ask { font-size: 15px; margin: 0 0 4px; }
 .talk .hint { font-size: 15px; color: var(--sub); margin: 0 0 12px; }
 .talk audio { width: 100%; margin: 8px 0; }
-.talk .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.talk .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.talk .topic { font-size: 19px; font-weight: 700; line-height: 1.5; margin: 8px 0; }
+.talk .live { font-size: 17px; line-height: 1.6; background: var(--chip); border-radius: 12px; padding: 10px 12px; min-height: 48px; margin: 8px 0; }
+.talk .picks { list-style: none; margin: 8px 0; padding: 0; border-top: 1px solid var(--line); }
+.talk .picks button { width: 100%; text-align: left; padding: 12px 0; min-height: 48px; border-bottom: 1px solid var(--line); font-size: 17px; }
+.talk .rounds { border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; margin: 8px 0; }
+.talk .rounds th, .talk .rounds td { padding: 4px 16px 4px 0; text-align: left; border-bottom: 1px solid var(--line); }
+.talk .rounds th { color: var(--sub); font-weight: 400; }
+.talk .fbbox { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.talk .fbbox h3 { font-size: 15px; margin: 0 0 6px; }
+.talk .fb { white-space: pre-wrap; font-size: 15px; line-height: 1.7; margin: 0; }
+.talk .secondary { min-height: 48px; padding: 0 18px; border-radius: 999px; font-weight: 700; }
+.speak .ev { font-size: 15px; margin: 0 0 8px; }
+.speak .ev a { color: var(--sub); }
 
 @media (min-width: 900px) {
   .app { flex-direction: row-reverse; }
@@ -206,6 +219,8 @@ code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>動画</button>
     <button data-tab="words">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>単語帳</button>
+    <button data-tab="speak">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>話す</button>
     <button data-tab="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>設定</button>
   </nav>
@@ -316,6 +331,16 @@ const Store = {
           if (!S.video && (S.tab === "words" || (S.tab === "videos" && dueIds().length !== S.dueShown))) render();
         }, () => {});
       }
+      // claude.ai 版だけ: Claude に見てもらう（sample）・質問を読み上げる（tts）・話した言葉を文字にする（dictation）
+      window.claude.use("sample").then(s => { S.sample = s; if (T.phase === "done") renderTalk(); }).catch(() => {});
+      window.claude.use("tts").then(x => { S.tts = x; }).catch(() => {});
+      window.claude.use("dictation").then(d => {
+        if (!d) return;
+        STT.dict = d;
+        d.onPartial(({ text }) => { if (T.phase === "talk") { T.interim = text; showLive(); } });
+        d.onFinal(({ text }) => { if (T.phase === "talk" || T.phase === "done") { T.text = (T.text + " " + text).trim(); T.interim = ""; showLive(); } });
+        if (!T.phase && $("#talk")) renderTalk();
+      }).catch(() => {});
     }
   },
   async put(id, doc) {
@@ -347,9 +372,10 @@ function render() {
   $("#tabs").hidden = !!S.video && innerWidth < 900;
   $("#ctrl").hidden = !(S.video && EMBED);
   if (S.video) return renderVideo(main);
-  $("#top").innerHTML = `<h1>${{ videos: "英語の動画帳", words: "単語帳", settings: "設定" }[S.tab]}</h1>`;
+  $("#top").innerHTML = `<h1>${{ videos: "英語の動画帳", words: "単語帳", speak: "話す", settings: "設定" }[S.tab]}</h1>`;
   if (S.tab === "videos") renderList(main);
   else if (S.tab === "words") renderWords(main);
+  else if (S.tab === "speak") renderSpeak(main);
   else renderSettings(main);
   main.scrollTop = 0;
 }
@@ -611,6 +637,22 @@ function renderWords(main) {
   </div>`;
 }
 
+// ---- 話す（動画を見なくても、面接の話題で話す練習ができる） ----
+function renderSpeak(main) {
+  const sp = [...Array(7)].map((_, k) => addDays(k - 6)).reduce((a, d) => a + (LG[d]?.sp || 0), 0);
+  main.innerHTML = `<div class="pad wrap speak">
+    <p class="note" style="margin:12px 0 0">この7日で話した回数: <b>${sp}回</b>${sp ? "" : "。まずは1回、2分話してみましょう"}。動画の画面の下からも、その動画の要約や意見を話せます。</p>
+    <section class="talk" id="talk"></section>
+    <div class="set"><h3>話す力をのばすやり方</h3>
+      <p class="ev">・同じ話を、時間を短くしてくり返す（4分→3分→2分の「4/3/2」）と、時間を変えずにくり返すより、すらすら話せるようになった — <a href="https://doi.org/10.1002/tesq.232" target="_blank" rel="noopener">Thai & Boers (2016)</a></p>
+      <p class="ev">・ただし時間を短くするだけでは、正確さや言葉の難しさは上がらず、まちがいがそのまま固まるおそれもある。直してもらうことを組み合わせると、すらすらさと正確さの両方が上がった — <a href="https://discovery.ucl.ac.uk/10128571/1/LTR2021.pdf" target="_blank" rel="noopener">Tran & Saito (2021)</a></p>
+      <p class="ev">・音声認識を使った発音の練習は、15件の研究のまとめで中くらいの効果。1つ1つの音には大きく、リズムや抑揚には小さかった — <a href="https://www.cambridge.org/core/journals/recall/article/effectiveness-of-automatic-speech-recognition-in-eslefl-pronunciation-a-metaanalysis/A915444CF252B61D14961D2FE733822D" target="_blank" rel="noopener">Ngo ほか (2024)</a></p>
+      <p class="ev">・AI と話す練習は、話す機会がふえ、話す不安が減ったという報告が多い。ただし小さな研究や本人の感想が中心で、悪い面を調べた研究は足りない。人と話す練習の代わりにはならない — <a href="https://diajeng.lldikti6.id/articles/18784" target="_blank" rel="noopener">24件のレビュー</a></p>
+      <p class="ev">・英検1級の面接: 5つの話題から1つ選び、考える1分（メモなし）→ 2分スピーチ → 4分の質問 — <a href="https://www.eiken.or.jp/eiken/exam/grade_1/solutions.html" target="_blank" rel="noopener">英検 1級の試験内容</a></p>
+    </div></div>`;
+  renderTalk();
+}
+
 // ---- 設定 ----
 function renderSettings(main) {
   const where = { db: "claude.ai（どの端末からでも同じ）", local: "このパソコンの douga-eigo/data/words.json", browser: "このブラウザの中だけ" }[Store.kind];
@@ -645,77 +687,197 @@ function renderSettings(main) {
 }
 
 // ---- 話す練習（英検1級の面接と同じく、考える1分のあとに話す）。録音はこのページの中だけに置き、どこにも送らない ----
+// 同じ話を、時間を短くしてくり返す（4/3/2 のやり方）と、すらすら話せるようになる。直してもらうことを組み合わせると正確さも上がる
 const TALKS = {
-  sum: { label: "1分で要約を話す", think: 60, talk: 60,
+  sum: { label: "この動画を1分で要約", think: 60, talk: 60,
     ask: "この話の言いたいことを1文で言い、それを支える点を2つ、英語で話す。",
     hint: "The speaker's main point is that … First, … Second, … So …" },
-  op: { label: "2分で意見を話す", think: 60, talk: 120,
-    ask: "話し手の考えに賛成か反対かを決め、理由を2つ挙げて英語で話す（英検1級のスピーチと同じ2分）。",
+  op: { label: "この動画に意見を2分", think: 60, talk: 120,
+    ask: "話し手の考えに賛成か反対かを決め、理由を2つ挙げて英語で話す。",
     hint: "I agree / disagree with the speaker that … I have two reasons. First, … Second, … For these reasons, …" },
+  topic: { label: "面接の話題から選ぶ（2分）", think: 60, talk: 120,
+    ask: "話題に対する自分の立場を決め、理由を2つ挙げて英語で話す（英検1級は、5つの話題から1つ選んで2分）。",
+    hint: "I believe that … There are two reasons. First, … Second, … In conclusion, …" },
+  qa: { label: "質問に答える", think: 0, talk: 60, ask: "面接官の質問に、英語ですぐ答える（考える時間なし）。", hint: "That's a good question. I think … because …" },
 };
-const T = { kind: null, phase: null, end: 0, timer: null, stream: null, rec: null, chunks: [], url: null, mic: false };
+// 英検1級の面接に近い、社会の話題（Claude が作った練習用。本物の過去問ではない）
+const TOPICS = [
+  "Will artificial intelligence create more jobs than it destroys?",
+  "Should social media companies be responsible for false information on their sites?",
+  "Is space exploration worth its cost?",
+  "Should rich countries accept more refugees?",
+  "Can carbon taxes solve climate change?",
+  "Should university education be free for everyone?",
+  "Is it ethical to edit the genes of human embryos?",
+  "Should the use of nuclear power be expanded?",
+  "Do smartphones do more harm than good to young people?",
+  "Should a four-day work week become the norm?",
+  "Is globalization good for developing countries?",
+  "Should governments regulate unhealthy food more strictly?",
+  "Can online learning replace traditional schools?",
+  "Should endangered languages be protected with public money?",
+  "Is economic inequality a threat to democracy?",
+  "Should animal testing be banned?",
+  "Should Japan accept more foreign workers?",
+  "Is tourism more beneficial or harmful to local communities?",
+  "Should governments be allowed to control the internet?",
+  "Are international organizations like the United Nations still effective?",
+  "Should companies be required to have more women in leadership positions?",
+  "Is a universal basic income a good idea?",
+  "Should the voting age be lowered to 16?",
+  "Can individuals make a real difference in fighting climate change?",
+  "Should privacy be sacrificed for national security?",
+  "Is the aging of society a crisis or an opportunity?",
+  "Should museums return cultural treasures to their countries of origin?",
+  "Does advertising do more harm than good?",
+  "Should wealthy people pay much higher taxes?",
+  "Is it important for everyone to learn a second language?",
+];
+// 話した言葉を文字にする。公開ページはブラウザの音声認識、claude.ai は dictation（どちらも使えないときは録音だけ）
+const STT = { web: window.SpeechRecognition || window.webkitSpeechRecognition || null, dict: null, r: null };
+const sttOn = () => pref("stt") !== "off" && !!(STT.web || STT.dict);
+const T = { kind: null, phase: null, end: 0, start: 0, timer: null, stream: null, rec: null, chunks: [], url: null, mic: false,
+  topic: "", picks: [], text: "", interim: "", rounds: [], fb: "", q: "", asking: false, len: 0 };
+const wordsOf = s => (s.match(WRE) || []).length;
+function promptOf() { return T.kind === "topic" || T.kind === "qa" ? T.topic : `${S.video?.title || ""}（${S.video?.ja || ""}）`; }
 function renderTalk() {
   const el = $("#talk"); if (!el) return;
   const k = TALKS[T.kind], left = Math.max(0, Math.ceil((T.end - Date.now()) / 1000));
+  const stt = (STT.web || STT.dict) ? `<label class="small" style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" data-stt ${sttOn() ? "checked" : ""}>話した言葉を文字にする（${STT.dict ? "claude.ai の音声入力" : "ブラウザの音声認識。Chrome なら Google、Safari なら Apple に声が送られます"}）</label>` : "";
   if (!T.phase) {
-    el.innerHTML = `<h2>見終わったら、話す練習</h2><p class="note">英検1級の面接は、考える1分（メモなし）のあとに2分のスピーチです。</p>
-      <div class="opts">${Object.entries(TALKS).map(([key, x]) => `<button data-talk="${key}">${x.label}</button>`).join("")}</div>`;
-  } else if (T.phase === "think" || T.phase === "talk") {
-    el.innerHTML = `<h2>${T.phase === "think" ? "考える時間" : T.mic ? "話す（録音中）" : "話す（録音なし）"}</h2>
-      <p class="clock" id="talkClock">${mmss(left)}</p><p class="ask">${esc(k.ask)}</p><p class="hint">${esc(k.hint)}</p>
-      <div class="row">${T.phase === "think" ? `<button class="primary" data-talknext>話しはじめる</button>` : `<button class="primary" data-talknext>終わる</button>`}
-      <button class="textbtn" data-talkstop>やめる</button></div>`;
+    el.innerHTML = `<h2>話す練習</h2><p class="note">英検1級の面接は、考える1分（メモなし）のあとに2分のスピーチです。話したら、同じ話を時間を短くしてもう2回くり返すと、すらすら話せるようになります。</p>
+      <div class="opts">${(S.video ? ["sum", "op", "topic"] : ["topic"]).map(key => `<button data-talk="${key}">${TALKS[key].label}</button>`).join("")}</div>${stt}`;
+  } else if (T.phase === "pick") {
+    el.innerHTML = `<h2>話題を1つ選ぶ</h2><p class="note">本番と同じく、5つから1つ。選ぶと考える1分が始まります。</p>
+      <ul class="picks">${T.picks.map((p, i) => `<li><button data-pick="${i}">${esc(p)}</button></li>`).join("")}</ul>
+      <div class="row"><button class="textbtn" data-talk="topic">ほかの5つ</button><button class="textbtn" data-talkstop>やめる</button></div>`;
+  } else if (T.phase === "think" || T.phase === "ready") {
+    el.innerHTML = `<h2>${T.phase === "think" ? "考える時間" : "考える時間は終わりです"}</h2>
+      ${T.phase === "think" ? `<p class="clock" id="talkClock">${mmss(left)}</p>` : `<p class="note">本番では、ここで話しはじめます。</p>`}
+      ${T.topic && T.kind !== "sum" && T.kind !== "op" ? `<p class="topic">${esc(T.topic)}</p>` : ""}<p class="ask">${esc(k.ask)}</p><p class="hint">${esc(k.hint)}</p>
+      <div class="row"><button class="primary" data-talknext>話しはじめる（${mmss(T.len)}）</button><button class="textbtn" data-talkstop>やめる</button></div>`;
+  } else if (T.phase === "talk") {
+    el.innerHTML = `<h2>話す${T.mic ? "（録音中）" : ""}</h2><p class="clock" id="talkClock">${mmss(left)}</p>
+      ${T.topic && T.kind !== "sum" && T.kind !== "op" ? `<p class="topic">${esc(T.topic)}</p>` : `<p class="ask">${esc(k.ask)}</p>`}
+      ${sttOn() ? `<p class="live" id="talkLive">${esc(T.text)} <span class="note">${esc(T.interim)}</span></p>` : ""}
+      <div class="row"><button class="primary" data-talknext>終わる</button><button class="textbtn" data-talkstop>やめる</button></div>`;
   } else {
-    el.innerHTML = `<h2>聞き返す</h2>
-      ${T.url ? `<audio controls src="${T.url}"></audio><p class="small">録音はこのページを閉じると消えます（どこにも送っていません）。言いよどんだ所・日本語が浮かんだ所をもう一度言い直してみてください。</p>`
-        : `<p class="note">${T.mic === false ? "マイクが使えなかったので、録音はありません。" : "録音がありません。"}</p>`}
-      <div class="row"><button class="primary" data-talk="${T.kind}">もう一度</button><button class="textbtn" data-talkstop>閉じる</button></div>`;
+    // 4/3/2 と同じ割合: 1回目の時間の 3/4 → 1/2（2分なら 1:30 → 1:00）
+    const n = T.rounds.length, last = T.rounds[n - 1] || {}, next = Math.max(30, Math.round(T.base * (n === 1 ? 0.75 : 0.5) / 15) * 15);
+    el.innerHTML = `<h2>聞き返す（${n}回目）</h2>
+      ${T.url ? `<audio controls src="${T.url}"></audio>` : `<p class="note">${T.mic ? "録音がありません。" : "このページではマイクの録音が使えないので、録音はありません。"}</p>`}
+      ${last.text ? `<p class="live">${esc(last.text)}</p>` : ""}
+      <table class="rounds"><tr><th></th><th>時間</th><th>語数</th><th>1分あたり</th></tr>${T.rounds.map((r, i) => `<tr><td>${i + 1}回目</td><td>${mmss(r.sec)}</td><td>${r.text ? wordsOf(r.text) : "—"}</td><td>${r.text && r.sec ? Math.round(wordsOf(r.text) / (r.sec / 60)) : "—"}</td></tr>`).join("")}</table>
+      <p class="small">${sttOn() ? "文字は音声認識の結果です。聞きまちがえられた所は、発音が通じにくかったかもしれません。" : "文字にすると、語数と1分あたりの語数が出ます。"}言いよどんだ所・日本語が浮かんだ所を、次の回で言い直してください。</p>
+      ${T.fb ? `<div class="fbbox"><h3>Claude から</h3><p class="fb">${esc(T.fb)}</p>${T.q ? `<div class="row">${S.tts ? `<button class="textbtn" data-sayq>質問を聞く</button>` : ""}<button class="primary" data-answer>質問に答える（1分）</button></div>` : ""}</div>` : ""}
+      <div class="row">${T.kind === "qa" ? "" : n < 3 ? `<button class="${T.fb ? "secondary" : "primary"}" data-again="${next}">同じ話を短く（${mmss(next)}）</button>` : `<button class="secondary" data-again="${T.len}">同じ時間でもう一度</button>`}
+        ${S.sample && last.text && !T.fb ? `<button class="secondary" data-askfb ${T.asking ? "disabled" : ""}>${T.asking ? "見ています…" : "Claude に見てもらう"}</button>` : ""}
+        ${!S.sample && last.text ? `<button class="textbtn" data-copytalk>文字をコピー</button>` : ""}
+        <button class="textbtn" data-talkstop>閉じる</button></div>`;
   }
+}
+function showLive() {
+  const el = $("#talkLive");
+  if (el) el.innerHTML = `${esc(T.text)} <span class="note">${esc(T.interim)}</span>`;
+  else if (T.phase === "done") { const r = T.rounds[T.rounds.length - 1]; if (r) r.text = T.text; renderTalk(); }
 }
 function talkClock() {
   const left = Math.max(0, Math.ceil((T.end - Date.now()) / 1000)), c = $("#talkClock");
   if (c) c.textContent = mmss(left);
-  if (left <= 0) talkNext();
+  if (left > 0) return;
+  // 考える時間が終わったら、押してから話しはじめる（文字にする機能は、押したときにしか始められないため）
+  if (T.phase === "think") { clearInterval(T.timer); T.timer = null; T.phase = "ready"; renderTalk(); }
+  else if (T.phase === "talk") talkNext();
 }
-async function talkStart(kind) {
-  talkReset();
-  if (player?.pauseVideo) player.pauseVideo();
-  T.kind = kind; T.phase = "think"; T.end = Date.now() + TALKS[kind].think * 1000;
-  T.timer = setInterval(talkClock, 250); renderTalk();
-  $("#talk")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-  // マイクは押したときに頼んでおき、話しはじめで録音を始める
+async function getMic() {
+  if (T.stream) return;
   try { T.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); T.mic = true; } catch (e) { T.mic = false; }
-  if (T.phase === "think") renderTalk();
+}
+function talkBegin(kind, len, think) {
+  if (player?.pauseVideo) player.pauseVideo();
+  T.kind = kind; T.len = len; T.fb = ""; T.q = T.kind === "qa" ? T.q : "";
+  if (think || !T.base) T.base = len;   // くり返しの元になる、1回目の時間
+  if (think) {
+    T.phase = "think"; T.end = Date.now() + think * 1000;
+    clearInterval(T.timer); T.timer = setInterval(talkClock, 250);
+    renderTalk();
+    $("#talk")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    getMic().then(() => { if (T.phase === "think") renderTalk(); });   // マイクは先に頼んでおく
+  } else { T.phase = "ready"; talkNext(); }
+}
+function sttStart() {
+  T.text = ""; T.interim = "";
+  if (!sttOn()) return;
+  if (STT.dict) { STT.dict.start().catch(() => {}); return; }   // 押した流れのまま呼ぶ（間に await をはさまない）
+  try {
+    const r = new STT.web(); r.lang = "en-US"; r.continuous = true; r.interimResults = true;
+    r.onresult = e => {
+      let inter = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const x = e.results[i];
+        if (x.isFinal) T.text = (T.text + " " + x[0].transcript).trim(); else inter += x[0].transcript;
+      }
+      T.interim = inter; showLive();
+    };
+    r.onend = () => { if (T.phase === "talk" && STT.r === r) { try { r.start(); } catch (e) {} } };  // 黙ると止まるので、話している間はつなぎ直す
+    r.onerror = () => {};
+    r.start(); STT.r = r;
+  } catch (e) { STT.r = null; }
+}
+function sttStop() {
+  if (STT.dict) { STT.dict.stop().catch(() => {}); return; }
+  const r = STT.r; STT.r = null;
+  if (r) { try { r.stop(); } catch (e) {} }
 }
 function talkNext() {
-  if (T.phase === "think") {
-    T.phase = "talk"; T.end = Date.now() + TALKS[T.kind].talk * 1000;
+  if (T.phase === "think" || T.phase === "ready") {
+    clearInterval(T.timer);
+    T.phase = "talk"; T.start = Date.now(); T.end = T.start + T.len * 1000;
+    sttStart();
     if (T.stream && window.MediaRecorder) {
       try {
         T.rec = new MediaRecorder(T.stream); T.chunks = [];
         T.rec.ondataavailable = e => { if (e.data.size) T.chunks.push(e.data); };
         T.rec.onstop = () => {
-          if (T.chunks.length) T.url = URL.createObjectURL(new Blob(T.chunks, { type: T.rec.mimeType || "audio/webm" }));
-          T.stream?.getTracks().forEach(tr => tr.stop()); T.stream = null;
+          if (T.url) URL.revokeObjectURL(T.url);
+          T.url = T.chunks.length ? URL.createObjectURL(new Blob(T.chunks, { type: T.rec.mimeType || "audio/webm" })) : null;
           renderTalk();
         };
         T.rec.start();
-      } catch (e) { T.rec = null; T.mic = false; }
+      } catch (e) { T.rec = null; }
     }
+    T.timer = setInterval(talkClock, 250);
     renderTalk();
   } else if (T.phase === "talk") {
     clearInterval(T.timer); T.timer = null; T.phase = "done";
+    sttStop();
+    T.rounds.push({ kind: T.kind, sec: Math.min(T.len, Math.round((Date.now() - T.start) / 1000)), text: (T.text + " " + T.interim).trim() });
+    T.text = T.rounds[T.rounds.length - 1].text; T.interim = "";
     addListen("sp", 1); saveListen();
-    if (T.rec && T.rec.state !== "inactive") T.rec.stop();   // 録音の後片づけは onstop で
-    else { T.stream?.getTracks().forEach(tr => tr.stop()); T.stream = null; renderTalk(); }
+    if (T.rec && T.rec.state !== "inactive") T.rec.stop(); else renderTalk();   // 録音の後片づけは onstop で
   }
 }
 function talkReset() {
-  clearInterval(T.timer); T.timer = null;
+  clearInterval(T.timer); T.timer = null; sttStop();
   try { if (T.rec && T.rec.state !== "inactive") { T.rec.onstop = null; T.rec.stop(); } } catch (e) {}
   T.stream?.getTracks().forEach(tr => tr.stop());
   if (T.url) URL.revokeObjectURL(T.url);
-  Object.assign(T, { kind: null, phase: null, end: 0, stream: null, rec: null, chunks: [], url: null, mic: false });
+  Object.assign(T, { kind: null, phase: null, end: 0, start: 0, stream: null, rec: null, chunks: [], url: null, mic: false, topic: "", picks: [], text: "", interim: "", rounds: [], fb: "", q: "", asking: false, len: 0, base: 0 });
+}
+// claude.ai 版だけ: Claude が英検の面接官のように見て、質問を1つ出す（利用枠を使う。追加のお金はかからない）
+async function askFeedback() {
+  const r = T.rounds[T.rounds.length - 1]; if (!S.sample || !r?.text) return;
+  T.asking = true; renderTalk();
+  const w = wordsOf(r.text), prompt = "あなたは英検1級の面接の練習相手をする英語の先生です。高校1年生が英語で話した内容を、音声認識で文字にしたものを見てください。文字にするときの聞きまちがいがあるかもしれません。聞きまちがいらしい所があれば「発音が通じにくかったかも」として1つ挙げてください。\n" +
+    `課題: ${TALKS[r.kind].ask}\n話題: ${promptOf()}\n${r.sec}秒で${w}語話した（1分あたり${r.sec ? Math.round(w / (r.sec / 60)) : 0}語）。\n` +
+    "日本語で、前置きなしに、次の4つだけを書く:\n1. 内容・語い・文法の観点ごとに ◎○△ と、理由を1行\n2. 直すとよい所を多くても3つ（言った英語 → よりよい英語、理由を短く）。大事な順に\n3. 同じ内容をもっと自然に言う見本（同じくらいの長さの英語）\n4. 最後の行に、面接官がしそうな英語の質問を1つ。「Q: 」で始める\n\n話した内容:\n\"\"\"\n" + r.text + "\n\"\"\"";
+  try {
+    const res = await S.sample(prompt, { modelTier: "default", onText: x => { T.fb = x.text; const el = $(".fb"); if (el) el.textContent = x.text; else renderTalk(); } });
+    T.fb = (res?.text || "").trim();
+    const m = T.fb.match(/Q:\s*(.+)\s*$/m); T.q = m ? m[1].trim() : "";
+    if (Store.db) Store.db.collection("talks").doc(new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)).set({ kind: r.kind, topic: promptOf(), text: r.text, sec: r.sec, words: w, fb: T.fb, at: new Date().toISOString() }).catch(() => {});
+  } catch (e) { T.fb = `見てもらえませんでした（${e?.code || "エラー"}）。少し待ってからもう一度押してください。`; }
+  T.asking = false; renderTalk();
 }
 
 // ---- 再生（家の Wi-Fi のときだけ） ----
@@ -844,9 +1006,27 @@ document.addEventListener("click", e => {
   const sj = t.closest("[data-showjp]"); if (sj) { sj.previousElementSibling.hidden = false; sj.remove(); return; }
   const se = t.closest("[data-showen]"); if (se) { se.previousElementSibling.hidden = false; se.remove(); return; }
   const tg = t.closest("[data-tab-go]"); if (tg) return setTab(tg.dataset.tabGo);
-  const tk = t.closest("[data-talk]"); if (tk) return talkStart(tk.dataset.talk);
+  const tk = t.closest("[data-talk]");
+  if (tk) {
+    const k = tk.dataset.talk; talkReset();
+    if (k === "topic") { T.kind = "topic"; T.picks = [...TOPICS].sort(() => Math.random() - 0.5).slice(0, 5); T.phase = "pick"; return renderTalk(); }
+    return talkBegin(k, TALKS[k].talk, TALKS[k].think);
+  }
+  const pk = t.closest("[data-pick]"); if (pk) { T.topic = T.picks[+pk.dataset.pick]; return talkBegin("topic", TALKS.topic.talk, TALKS.topic.think); }
   if (t.closest("[data-talknext]")) return talkNext();
   if (t.closest("[data-talkstop]")) { talkReset(); return renderTalk(); }
+  const ag = t.closest("[data-again]"); if (ag) return talkBegin(T.kind, +ag.dataset.again, 0);
+  if (t.closest("[data-askfb]")) return askFeedback();
+  if (t.closest("[data-answer]")) { T.topic = T.q; return talkBegin("qa", TALKS.qa.talk, 0); }
+  if (t.closest("[data-sayq]")) { S.tts?.speak(T.q, { language: "en" }).catch(() => {}); return; }
+  const ct = t.closest("[data-copytalk]");
+  if (ct) {
+    const r = T.rounds.at(-1); if (!r) return;
+    const txt = `英検1級の面接の練習です。次の英語は、私が話した内容を音声認識で文字にしたものです。内容・語い・文法で見て、直すとよい所を3つと、自然に言う見本、最後に面接官がしそうな質問を1つください。\n話題: ${promptOf()}\n${r.sec}秒で話しました。\n\n${r.text}`;
+    navigator.clipboard?.writeText(txt).then(() => { ct.textContent = "コピーしました（Claude のチャットに貼る）"; }, () => {});
+    return;
+  }
+  const st = t.closest("[data-stt]"); if (st) { pref("stt", st.checked ? "on" : "off"); return; }
   if (t.closest("[data-rev]")) { const q = dueIds(); S.review = { q, base: q.length, i: 0, show: false, ok: 0 }; return render(); }
   if (t.closest("[data-revend]")) { S.review = null; return render(); }
   if (t.closest("[data-reveal]")) { S.review.show = true; return render(); }
