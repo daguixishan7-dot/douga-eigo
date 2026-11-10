@@ -174,6 +174,11 @@ code { font-size: 15px; background: var(--chip); padding: 1px 6px; border-radius
 .grade { display: flex; gap: 12px; margin-top: 20px; }
 .grade button { flex: 1; min-height: 52px; border-radius: 999px; font-weight: 700; }
 .secondary { background: var(--chip); }
+.btn2 { min-height: 48px; padding: 0 18px; border-radius: 999px; font-weight: 700; }
+.send { padding: 12px 0; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.send h3 { font-size: 17px; margin: 0; }
+.send .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.send textarea { width: 100%; min-height: 120px; font: 13px/1.4 ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--fg); }
 
 /* 話す練習 */
 .talk { border-top: 1px solid var(--line); padding: 16px 0 40px; }
@@ -574,14 +579,15 @@ function closeSheet() {
 }
 
 // ---- 復習（日をあけて思い出す）。思い出せたら次は 3→7→14→30→60日後、だめなら明日。60日後にも思い出せたら「覚えた」 ----
+// 読みもの（claude.ai）へ送った単語（sent）は、読みものの「単語帳」でまとめて復習するので、ここでは出さない（同じ単語を2か所で復習しないため）
 const GAPS = [1, 3, 7, 14, 30, 60];
 const dueOf = w => w.due || today();   // 復習の日がない（前からある）単語は、今日が復習の日
 function dueIds() {
   const t = today();
-  return Object.entries(S.words).filter(([, w]) => !w.done && dueOf(w) <= t).sort((a, b) => dueOf(a[1]).localeCompare(dueOf(b[1]))).map(([id]) => id);
+  return Object.entries(S.words).filter(([, w]) => !w.done && !w.sent && dueOf(w) <= t).sort((a, b) => dueOf(a[1]).localeCompare(dueOf(b[1]))).map(([id]) => id);
 }
 function nextDue() {
-  const t = today(), fut = Object.values(S.words).filter(w => !w.done && dueOf(w) > t).map(dueOf).sort();
+  const t = today(), fut = Object.values(S.words).filter(w => !w.done && !w.sent && dueOf(w) > t).map(dueOf).sort();
   return fut.length ? { day: fut[0], n: fut.filter(d => d === fut[0]).length } : null;
 }
 function grade(id, ok) {
@@ -612,6 +618,31 @@ function renderReview(main) {
   </div>`;
 }
 
+// ---- 読みものの単語帳へ送る（コピー → 読みもので貼る）。英語の読みもの（claude.ai）の「単語帳」に1つにまとめる ----
+const EIGO_URL = "https://claude.ai/artifact/92yW419CqU3wmV8XKu48Yd";
+function sendText(ids) {
+  const words = ids.map(id => {
+    const w = S.words[id], v = S.videos.find(x => x.id === w.vid);
+    return { w: w.head, m: w.mean || "", en: w.en || "", ja: w.ja || "", vid: w.vid || "", t: w.t || 0, vt: v?.ja || "",
+      box: w.box || 0, due: w.due || "", ok: w.ok || 0, ng: w.ng || 0, done: !!w.done, n: w.n || 1 };
+  });
+  return `英語の動画帳の単語 ${words.length}語。英語の読みものの「単語帳」の「動画帳の単語を入れる」に、この文を全部貼ってください。\n`
+    + JSON.stringify({ app: "douga-eigo", v: 1, words });
+}
+function markSent(ids) { const d = today(); ids.forEach(id => { const w = S.words[id]; if (w && !w.sent) Store.put(id, { ...w, sent: d }); }); }
+function sendHTML(total) {
+  if (!total) return "";
+  const ids = Object.keys(S.words), unsent = ids.filter(id => !S.words[id].sent).length;
+  return `<div class="send"><h3>読みものの単語帳に1つにまとめる</h3>
+    <p class="small">単語帳は、英語の読みもの（claude.ai）の「単語帳」にまとめます。「コピー」を押して、読みものの「単語帳」の「動画帳の単語を入れる」に貼ってください。送った単語は、ここでは復習に出さず、読みもので復習します。</p>
+    <div class="row">${unsent ? `<button class="secondary btn2" data-send="new">まだ送っていない ${unsent}語をコピー</button>` : `<span class="note">全部送りました。</span>`}
+      <a class="textbtn" href="${EIGO_URL}" target="_blank" rel="noopener">読みものを開く</a></div>
+    ${S.sendMsg ? `<p class="note" role="status">${esc(S.sendMsg)}</p>` : ""}
+    ${S.sendTxt ? `<p class="small">自動でコピーできませんでした。下の文を長押しして全部選び、コピーしてから「コピーした」を押してください。</p>
+      <textarea readonly id="sendTxt">${esc(S.sendTxt)}</textarea><div class="row"><button class="secondary btn2" data-sent>コピーした</button></div>` : ""}
+    ${unsent < ids.length ? `<button class="textbtn" data-send="all" style="justify-self:start">送った分も入れて、全部コピーし直す</button>` : ""}</div>`;
+}
+
 // ---- 単語帳 ----
 function renderWords(main) {
   if (S.review) return renderReview(main);
@@ -622,10 +653,11 @@ function renderWords(main) {
   main.innerHTML = `<div class="pad wrap">
     ${total ? `<div class="revbox">${due.length ? `<p>今日の復習 <b>${due.length}語</b></p><button class="primary" data-rev>復習する</button>`
       : `<p class="note">今日の復習はおわりです。${nx ? `次は ${md(nx.day)} に ${nx.n}語。` : ""}</p>`}</div>` : ""}
+    ${sendHTML(total)}
     <p class="note" style="margin:12px 0 8px">単語の板で「単語帳に入れる」を押した単語が入ります。${total}語のうち ${done}語 覚えた。</p>
     <div class="seg" role="group" aria-label="表示">${[["todo", "まだ"], ["all", "すべて"]].map(([k, l]) => `<button data-wshow="${k}" aria-pressed="${show === k}">${l}</button>`).join("")}</div>
     ${list.length ? `<ul class="list">${list.map(([id, w]) => `<li class="wrow ${w.done ? "done" : ""}" data-id="${esc(id)}">
-      <button data-open><span class="word">${esc(w.head)}</span><span class="cnt">${w.n}回</span><span class="mean">${esc(w.mean)}</span></button>
+      <button data-open><span class="word">${esc(w.head)}</span><span class="cnt">${w.n}回${w.sent ? "・送った" : ""}</span><span class="mean">${esc(w.mean)}</span></button>
       <div class="more" hidden>
         <div>${esc(w.en)}</div><div class="small">${esc(w.ja)}</div>
         <div class="row" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
@@ -1027,6 +1059,17 @@ document.addEventListener("click", e => {
     return;
   }
   const st = t.closest("[data-stt]"); if (st) { pref("stt", st.checked ? "on" : "off"); return; }
+  const sd = t.closest("[data-send]");
+  if (sd) {
+    const ids = Object.keys(S.words).filter(id => sd.dataset.send === "all" || !S.words[id].sent);
+    if (!ids.length) return;
+    const txt = sendText(ids);
+    const ok = () => { markSent(ids); S.sendTxt = ""; S.sendIds = null; S.sendMsg = `${ids.length}語をコピーしました。読みものの「単語帳」で貼ってください。`; render(); };
+    const ng = () => { S.sendTxt = txt; S.sendIds = ids; S.sendMsg = ""; render(); const ta = $("#sendTxt"); if (ta) { ta.focus(); ta.select(); } };
+    try { navigator.clipboard.writeText(txt).then(ok, ng); } catch (e) { ng(); }
+    return;
+  }
+  if (t.closest("[data-sent]")) { if (S.sendIds) markSent(S.sendIds); S.sendTxt = ""; S.sendMsg = `${(S.sendIds || []).length}語を送った印にしました。読みものの「単語帳」で貼ってください。`; S.sendIds = null; return render(); }
   if (t.closest("[data-rev]")) { const q = dueIds(); S.review = { q, base: q.length, i: 0, show: false, ok: 0 }; return render(); }
   if (t.closest("[data-revend]")) { S.review = null; return render(); }
   if (t.closest("[data-reveal]")) { S.review.show = true; return render(); }
